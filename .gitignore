@@ -1,0 +1,26 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output
+frontend/dist/
+backend/public/
+
+# Data (SQLite + uploads + generated assets)
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log

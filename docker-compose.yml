@@ -1,0 +1,14 @@
+services:
+  orms:
+    build: .
+    container_name: orms-app
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - JWT_SECRET=change-me-to-a-long-random-string
+      - OPENROUTER_API_KEY=your-openrouter-api-key-here
+      - APP_REFERER=http://localhost:3001
+      - APP_TITLE=OpenRouter Media Studio
+    volumes:
+      - ./data:/app/data
