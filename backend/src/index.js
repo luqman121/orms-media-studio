@@ -16,7 +16,9 @@ const generateRoutes = require('./routes/generate');
 const assetsRoutes = require('./routes/assets');
 
 const app = express();
-app.use(cors());
+// CORS — restrict to CORS_ORIGIN (comma-separated) in production; allow all when unset (dev/default)
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(cors(corsOrigin ? { origin: corsOrigin.split(',').map(s => s.trim()) } : {}));
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
@@ -26,7 +28,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/models', modelsRoutes);
 app.use('/api/generate', generateRoutes);
 app.use('/api/assets', assetsRoutes);
-app.use('/api/generations', (req, res, next) => next()); // fall-through handled by generate router
 
 // SPA static + fallback — try several candidate dirs in order
 const fs = require('fs');
@@ -50,6 +51,15 @@ if (staticDir) {
 } else {
   console.log('[static] No frontend build found — API-only mode.');
 }
+
+// Global error handler — return localized JSON instead of HTML stack traces
+// (e.g. multer file-size limit, malformed JSON body)
+app.use((err, req, res, next) => {
+  console.error('[error]', err.message);
+  if (res.headersSent) return next(err);
+  const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 500);
+  res.status(status).json({ error: err.message || 'خطأ في الخادم' });
+});
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 app.listen(PORT, '0.0.0.0', () => {

@@ -260,7 +260,7 @@ export default function GeneratePage() {
           {mode === 'video' && (
             <div>
               <label className="lbl">المدة (ثانية)</label>
-              <input className="field" type="number" min={1} max={20} value={duration} onChange={e=>setDuration(e.target.value)} disabled={running} placeholder="ق automatically" />
+              <input className="field" type="number" min={1} max={20} value={duration} onChange={e=>setDuration(e.target.value)} disabled={running} placeholder="تلقائي" />
             </div>
           )}
           {(mode==='image' && supportedKeys.includes('resolution')) || mode==='video' ? (

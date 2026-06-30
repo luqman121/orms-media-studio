@@ -49,7 +49,12 @@ router.post('/image', auth, upload.single('image'), async (req, res) => {
   for (const k of ['n','resolution','aspect_ratio','quality','output_format','background','seed']) {
     if (body[k] !== undefined && body[k] !== '') {
       const v = body[k];
-      params[k] = (k === 'n' || k === 'seed') ? Number(v) : v;
+      if (k === 'n' || k === 'seed') {
+        const num = Number(v);
+        if (!Number.isNaN(num)) params[k] = num; // skip non-numeric instead of forwarding NaN
+      } else {
+        params[k] = v;
+      }
     }
   }
   // Optional reference image
@@ -198,7 +203,12 @@ router.post('/video', auth, upload.single('image'), async (req, res) => {
   const params = { model: body.model, prompt: body.prompt };
   for (const k of ['duration','resolution','aspect_ratio','size']) {
     if (body[k] !== undefined && body[k] !== '') {
-      params[k] = (k === 'duration') ? Number(body[k]) : body[k];
+      if (k === 'duration') {
+        const num = Number(body[k]);
+        if (!Number.isNaN(num)) params[k] = num; // skip non-numeric instead of forwarding NaN
+      } else {
+        params[k] = body[k];
+      }
     }
   }
   // Optional image -> as frame_image (first_frame) for image-to-video
