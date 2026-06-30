@@ -1,0 +1,8 @@
+# Vercel only builds and serves the frontend (static SPA).
+# The backend is a stateful Express server — it is NOT deployed to Vercel.
+# Keep these out of the Vercel deployment upload.
+backend/
+data/
+Dockerfile
+docker-compose.yml
+.dockerignore
