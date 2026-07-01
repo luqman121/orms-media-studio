@@ -1,11 +1,10 @@
-// Ported from backend/src/routes/generate.js — GET + DELETE /api/generate/generations/:id
-import fs from 'node:fs';
-import path from 'node:path';
+// GET + DELETE /api/generate/generations/:id
+// Phase 4: DELETE removes asset objects from R2 (fire-and-forget; non-fatal if R2 fails).
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
 import { serializeGeneration } from '@/lib/serialize';
-import { ASSETS_DIR } from '@/lib/storage';
+import { deleteObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,11 +29,13 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const { id } = await ctx.params;
     const row = await prisma.generation.findFirst({ where: { id: Number(id), userId } });
     if (!row) return json({ error: 'غير موجود' }, 404);
-    for (const fn of String(row.assetPath || '').split(',')) {
-      if (!fn) continue;
-      const p = path.join(ASSETS_DIR, fn);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    }
+    // Delete R2 objects; non-fatal if already gone.
+    await Promise.allSettled(
+      String(row.assetPath || '')
+        .split(',')
+        .filter(Boolean)
+        .map((key) => deleteObject(key)),
+    );
     await prisma.generation.delete({ where: { id: row.id } });
     return json({ ok: true });
   } catch (e) {

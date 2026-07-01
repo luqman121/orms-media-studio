@@ -1,13 +1,13 @@
-// Ported from backend/src/routes/generate.js — POST /api/generate/image
+// POST /api/generate/image
 // Supports synchronous generation and SSE streaming (stream=true), plus an optional
 // reference image (img2img) sent as multipart/form-data.
-import fs from 'node:fs';
-import path from 'node:path';
+// Phase 4: generated images are stored in R2 (putObject); reference image is inlined
+// as a base64 data URL — never written to disk.
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
-import { UPLOADS_DIR, ASSETS_DIR, ensureStorageDirs } from '@/lib/storage';
+import { putObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,7 @@ function buildParams(fields: Record<string, any>): Record<string, unknown> {
     if (v !== undefined && v !== '') {
       if (k === 'n' || k === 'seed') {
         const num = Number(v);
-        if (!Number.isNaN(num)) params[k] = num; // skip non-numeric instead of forwarding NaN
+        if (!Number.isNaN(num)) params[k] = num;
       } else {
         params[k] = v;
       }
@@ -40,13 +40,9 @@ export async function POST(req: Request) {
     const wantStream = fields.stream === true || fields.stream === 'true';
     const params = buildParams(fields);
 
-    // Optional reference image → inline as a base64 data URL.
+    // Optional reference image — inline as base64 data URL, no disk write.
     if (file) {
       try {
-        ensureStorageDirs();
-        const ext = (path.extname(file.filename) || '.png').toLowerCase();
-        const upName = `up_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-        fs.writeFileSync(path.join(UPLOADS_DIR, upName), file.buffer);
         const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
         params.input_references = [{ type: 'image_url', image_url: { url: dataUrl } }];
       } catch {
@@ -54,7 +50,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Create DB record as pending.
     const record = await prisma.generation.create({
       data: {
         userId,
@@ -73,7 +68,7 @@ export async function POST(req: Request) {
       return streamImage(recordId, params, t0);
     }
 
-    // Non-streaming.
+    // Non-streaming: generate, detect format, upload to R2.
     const result = await orouter.generateImage(params);
     const items = result.data || [];
     const saved: { filename: string; media_type: string }[] = [];
@@ -86,24 +81,18 @@ export async function POST(req: Request) {
       const isPng = buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
       let mediaType: string, ext: string;
       if (isJpeg) {
-        mediaType = 'image/jpeg';
-        ext = '.jpg';
+        mediaType = 'image/jpeg'; ext = '.jpg';
       } else if (isPng) {
-        mediaType = 'image/png';
-        ext = '.png';
+        mediaType = 'image/png'; ext = '.png';
       } else if (it.media_type === 'image/webp') {
-        mediaType = 'image/webp';
-        ext = '.webp';
+        mediaType = 'image/webp'; ext = '.webp';
       } else if (it.media_type === 'image/svg+xml') {
-        mediaType = 'image/svg+xml';
-        ext = '.svg';
+        mediaType = 'image/svg+xml'; ext = '.svg';
       } else {
-        mediaType = it.media_type || 'image/png';
-        ext = '.png';
+        mediaType = it.media_type || 'image/png'; ext = '.png';
       }
-      ensureStorageDirs();
       const fname = `img_${recordId}_${i}${ext}`;
-      fs.writeFileSync(path.join(ASSETS_DIR, fname), buf);
+      await putObject(fname, buf, mediaType);
       saved.push({ filename: fname, media_type: mediaType });
     }
     if (saved.length === 0) throw new Error('لم يُرجع الموديل أي صورة');
@@ -138,7 +127,7 @@ export async function POST(req: Request) {
   }
 }
 
-// SSE streaming — proxies OpenRouter's image stream and persists the final image.
+// SSE streaming — proxies OpenRouter's image stream and persists the final image to R2.
 function streamImage(recordId: number, params: Record<string, unknown>, t0: number): Response {
   const enc = new TextEncoder();
 
@@ -183,9 +172,8 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
                 const mediaType = evt.media_type || 'image/png';
                 const ext =
                   mediaType === 'image/jpeg' ? '.jpg' : mediaType === 'image/webp' ? '.webp' : mediaType === 'image/svg+xml' ? '.svg' : '.png';
-                ensureStorageDirs();
                 const fname = `img_${recordId}_0${ext}`;
-                fs.writeFileSync(path.join(ASSETS_DIR, fname), Buffer.from(evt.b64_json, 'base64'));
+                await putObject(fname, Buffer.from(evt.b64_json, 'base64'), mediaType);
                 const cost = evt.usage?.cost ? String(evt.usage.cost) : null;
                 await prisma.generation.update({
                   where: { id: recordId },

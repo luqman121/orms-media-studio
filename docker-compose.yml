@@ -15,8 +15,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: apply Prisma migrations before the app starts. Uses the builder
-  # image (which has the Prisma CLI + schema), then exits.
+  # One-shot: apply Prisma migrations before the app starts.
   migrate:
     build:
       context: .
@@ -39,15 +38,17 @@ services:
       - OPENROUTER_API_KEY=your-openrouter-api-key-here
       - APP_REFERER=http://localhost:3000
       - APP_TITLE=OpenRouter Media Studio
-      - DATA_DIR=/app/data
       - DATABASE_URL=postgresql://orms:orms@db:5432/orms?schema=public
+      # Phase 4: Cloudflare R2 — set real values in a .env file or secrets manager.
+      - R2_ACCOUNT_ID=your-cloudflare-account-id
+      - R2_ACCESS_KEY_ID=your-r2-access-key-id
+      - R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+      - R2_BUCKET=orms-assets
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    volumes:
-      - ./data:/app/data
   # Phase 5 adds a `worker` service (BullMQ video-poll) + redis here.
 
 volumes:

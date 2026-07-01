@@ -1,12 +1,11 @@
-// Ported from backend/src/routes/generate.js — POST /api/generate/generations/:id/poll
-// Force-updates a video job's status from OpenRouter (used by the client poller).
-import fs from 'node:fs';
-import path from 'node:path';
+// POST /api/generate/generations/:id/poll
+// Force-updates a video job's status from OpenRouter (client-triggered check).
+// Phase 4: completed video is uploaded to R2 via putObject.
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
-import { ASSETS_DIR, ensureStorageDirs } from '@/lib/storage';
+import { putObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,9 +28,8 @@ export async function POST(req: Request, ctx: Ctx) {
         const urls = resp.unsigned_urls || [];
         if (urls.length > 0) {
           const buf = await orouter.downloadVideoContent(row.jobId, 0);
-          ensureStorageDirs();
           const fname = `vid_${row.id}_0.mp4`;
-          fs.writeFileSync(path.join(ASSETS_DIR, fname), buf);
+          await putObject(fname, buf, 'video/mp4');
           const cost = resp.usage?.cost ? String(resp.usage.cost) : null;
           await prisma.generation.update({
             where: { id: row.id },
