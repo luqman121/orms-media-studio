@@ -1,11 +1,12 @@
 // POST /api/generate/video
-// Submits an async video job, responds immediately, then polls + downloads in the
-// background (fire-and-forget; Phase 5 replaces this with a durable BullMQ worker).
-// Phase 4: reference image is inlined as base64 — no disk write needed.
+// Submits an async video job to OpenRouter, then enqueues a 'video-poll' BullMQ job
+// for the worker process (apps/worker) to poll and download.
+// Falls back to the in-process fire-and-forget poller when REDIS_URL is not set (dev).
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
+import { enqueueVideoJob } from '@/lib/queue';
 import { pollAndDownloadVideo } from '@/lib/videoPoll';
 
 export const runtime = 'nodejs';
@@ -64,9 +65,15 @@ export async function POST(req: Request) {
       data: { status: 'pending', jobId, pollingUrl },
     });
 
-    pollAndDownloadVideo(recordId, jobId, t0).catch((e) => {
-      console.error('background poll failed:', (e as Error).message);
-    });
+    // Use the durable BullMQ worker when Redis is available; otherwise fall back to the
+    // in-process fire-and-forget poller (local dev without Redis).
+    if (process.env.REDIS_URL) {
+      await enqueueVideoJob(recordId, jobId, t0);
+    } else {
+      pollAndDownloadVideo(recordId, jobId, t0).catch((e) => {
+        console.warn('[video] in-process poll failed (set REDIS_URL for durable jobs):', (e as Error).message);
+      });
+    }
 
     return json({
       id: recordId,

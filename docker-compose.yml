@@ -15,6 +15,16 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: orms-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # One-shot: apply Prisma migrations before the app starts.
   migrate:
     build:
@@ -39,6 +49,7 @@ services:
       - APP_REFERER=http://localhost:3000
       - APP_TITLE=OpenRouter Media Studio
       - DATABASE_URL=postgresql://orms:orms@db:5432/orms?schema=public
+      - REDIS_URL=redis://redis:6379
       # Phase 4: Cloudflare R2 — set real values in a .env file or secrets manager.
       - R2_ACCOUNT_ID=your-cloudflare-account-id
       - R2_ACCESS_KEY_ID=your-r2-access-key-id
@@ -47,9 +58,35 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
-  # Phase 5 adds a `worker` service (BullMQ video-poll) + redis here.
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: orms-worker
+    restart: unless-stopped
+    ports:
+      - '4001:4001'
+    environment:
+      - DATABASE_URL=postgresql://orms:orms@db:5432/orms?schema=public
+      - REDIS_URL=redis://redis:6379
+      - OPENROUTER_API_KEY=your-openrouter-api-key-here
+      - R2_ACCOUNT_ID=your-cloudflare-account-id
+      - R2_ACCESS_KEY_ID=your-r2-access-key-id
+      - R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+      - R2_BUCKET=orms-assets
+      - ADMIN_SECRET=change-me-to-a-long-random-string
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   orms-pgdata:
