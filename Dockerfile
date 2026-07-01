@@ -13,7 +13,8 @@ COPY packages/openrouter/package.json ./packages/openrouter/
 COPY packages/db/package.json ./packages/db/
 RUN npm ci
 
-# Build the Next.js app (produces .next/standalone).
+# Build the Next.js app. The root `build` script runs `prisma generate` first, so
+# the Prisma client (+ query engine) is produced here.
 COPY . .
 RUN npm run build
 
@@ -28,7 +29,11 @@ ENV NODE_ENV=production \
 # Standalone output (traced from the monorepo root) + static assets.
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+# Prisma is external (not bundled): ship the generated client + native query engine.
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 RUN mkdir -p /app/data
 EXPOSE 3000
+# Migrations are applied by the compose `migrate` service; this just runs the app.
 CMD ["node", "apps/web/server.js"]

@@ -1,8 +1,9 @@
 // Ported from backend/src/routes/auth.js — POST /api/auth/register
 import bcrypt from 'bcryptjs';
-import { getDB } from '@/lib/db';
+import { prisma } from '@orms/db';
 import { sign } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { serializeUser } from '@/lib/serialize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,18 +18,16 @@ export async function POST(req: Request) {
     if (!email || !password) return json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبان' }, 400);
     if (password.length < 6) return json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' }, 400);
 
-    const db = getDB();
-    const existing = db.prepare('SELECT id FROM users WHERE email=?').get(email.toLowerCase());
+    const lower = email.toLowerCase();
+    const existing = await prisma.user.findUnique({ where: { email: lower }, select: { id: true } });
     if (existing) return json({ error: 'البريد الإلكتروني مستخدم بالفعل' }, 409);
 
     const hash = bcrypt.hashSync(password, 10);
-    const info = db
-      .prepare('INSERT INTO users (email, password, name) VALUES (?, ?, ?)')
-      .run(email.toLowerCase(), hash, name || null);
-    const user = db
-      .prepare('SELECT id, email, name, created_at FROM users WHERE id=?')
-      .get(Number(info.lastInsertRowid)) as { id: number };
-    return json({ token: sign(user.id), user });
+    const user = await prisma.user.create({
+      data: { email: lower, password: hash, name: name || null },
+      select: { id: true, email: true, name: true, createdAt: true },
+    });
+    return json({ token: sign(user.id), user: serializeUser(user) });
   } catch (e) {
     return handleError(e);
   }

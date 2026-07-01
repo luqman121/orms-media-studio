@@ -6,17 +6,22 @@ The app is now a **single Next.js 15 application** (`apps/web`) that serves the 
 |------|------|---------------|
 | `apps/web` | Next.js 15 (UI + API route handlers) | Container host (Render / Railway / Fly.io / VPS) with a persistent volume |
 
+## Database
+
+Persistence is **PostgreSQL via Prisma**. Provision a managed Postgres (Neon / Supabase / RDS) and set `DATABASE_URL`. Apply the schema with `npm run migrate:deploy` (the compose stack does this automatically via its one-shot `migrate` service).
+
+> **Supabase note:** the direct connection host (`db.<ref>.supabase.co:5432`) is IPv6-only on newer projects. Use the **IPv4 session pooler** URL (`postgres.<ref>:<pw>@aws-…pooler.supabase.com:5432/postgres`), and URL-encode any special characters in the password (`@` → `%40`). The session pooler (5432) supports migrations; the transaction pooler (6543) does not.
+
 ## Why not Vercel serverless (yet)
 
 Vercel runs **stateless serverless functions**. The current app is still stateful and needs a long-running server:
 
-1. **`node:sqlite`** — the DB is a file on local disk (`apps/web/lib/db.ts`).
-2. **Local-disk assets** — uploads + generated images/videos are written under `data/` (`apps/web/lib/storage.ts`); a serverless filesystem is ephemeral and wiped between invocations.
-3. **Background work** — video generation runs a ~15-minute `pollAndDownloadVideo()` *after* the HTTP response (`apps/web/lib/videoPoll.ts`); a serverless function is frozen the moment it responds.
+1. **Local-disk assets** — uploads + generated images/videos are written under `data/` (`apps/web/lib/storage.ts`); a serverless filesystem is ephemeral and wiped between invocations.
+2. **Background work** — video generation runs a ~15-minute `pollAndDownloadVideo()` *after* the HTTP response (`apps/web/lib/videoPoll.ts`); a serverless function is frozen the moment it responds.
 
-Phases 3–5 of the migration (Postgres, R2 object storage, BullMQ queue) remove these constraints and make serverless viable. Until then, self-host.
+Phases 4–5 of the migration (R2 object storage, BullMQ queue) remove these constraints and make serverless viable. Until then, self-host.
 
-> **Node 22+ is required** (the API uses the built-in `node:sqlite`). The `Dockerfile` uses `node:24`.
+> **Node 22+ is required** and the `Dockerfile` uses `node:24`. The Phase 3 Docker changes (Prisma engine copy + `migrate` service) were not built in the dev env — run `docker compose build` once before deploying.
 
 ## Architecture
 
@@ -39,6 +44,7 @@ Set these environment variables:
 
 | Variable | Value |
 |----------|-------|
+| `DATABASE_URL` | your Postgres connection string (Neon/Supabase/RDS) |
 | `OPENROUTER_API_KEY` | your key from https://openrouter.ai/keys |
 | `JWT_SECRET` | a long random hex string (**required in prod**) |
 | `APP_REFERER` | your public URL, e.g. `https://your-app.onrender.com` |

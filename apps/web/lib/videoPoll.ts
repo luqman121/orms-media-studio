@@ -4,12 +4,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as orouter from '@orms/openrouter';
-import { getDB } from './db';
+import { prisma } from '@orms/db';
 import { ASSETS_DIR, ensureStorageDirs } from './storage';
 
 // Poll every 10s for up to ~15 minutes, then download the file.
 export async function pollAndDownloadVideo(recordId: number, jobId: string, t0: number): Promise<void> {
-  const db = getDB();
   const MAX_POLLS = 90; // 15 min @ 10s
   for (let i = 0; i < MAX_POLLS; i++) {
     await new Promise((r) => setTimeout(r, 10000));
@@ -21,10 +20,9 @@ export async function pollAndDownloadVideo(recordId: number, jobId: string, t0: 
       continue;
     }
     const status = resp.status;
-    db.prepare(`UPDATE generations SET status=?, updated_at=datetime('now') WHERE id=?`).run(
-      status === 'in_progress' ? 'in_progress' : status,
-      recordId,
-    );
+    await prisma.generation
+      .update({ where: { id: recordId }, data: { status: status === 'in_progress' ? 'in_progress' : status } })
+      .catch(() => {});
     if (status === 'completed') {
       const urls = resp.unsigned_urls || [];
       if (urls.length === 0) break;
@@ -34,25 +32,24 @@ export async function pollAndDownloadVideo(recordId: number, jobId: string, t0: 
         const fname = `vid_${recordId}_0.mp4`;
         fs.writeFileSync(path.join(ASSETS_DIR, fname), buf);
         const cost = resp.usage?.cost ? String(resp.usage.cost) : null;
-        db.prepare(
-          `UPDATE generations SET status='completed', asset_path=?, asset_media_type='video/mp4', cost=?, duration_ms=?, updated_at=datetime('now') WHERE id=?`,
-        ).run(fname, cost, Date.now() - t0, recordId);
+        await prisma.generation.update({
+          where: { id: recordId },
+          data: { status: 'completed', assetPath: fname, assetMediaType: 'video/mp4', cost, durationMs: Date.now() - t0 },
+        });
       } catch (e) {
-        db.prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
-          'download failed: ' + (e as Error).message,
-          recordId,
-        );
+        await prisma.generation
+          .update({ where: { id: recordId }, data: { status: 'failed', error: 'download failed: ' + (e as Error).message } })
+          .catch(() => {});
       }
       return;
     } else if (status === 'failed') {
-      db.prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
-        resp.error || 'generation failed',
-        recordId,
-      );
+      await prisma.generation
+        .update({ where: { id: recordId }, data: { status: 'failed', error: resp.error || 'generation failed' } })
+        .catch(() => {});
       return;
     }
   }
-  db.prepare(`UPDATE generations SET status='failed', error='timeout waiting for video', updated_at=datetime('now') WHERE id=?`).run(
-    recordId,
-  );
+  await prisma.generation
+    .update({ where: { id: recordId }, data: { status: 'failed', error: 'timeout waiting for video' } })
+    .catch(() => {});
 }

@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as orouter from '@orms/openrouter';
-import { getDB } from '@/lib/db';
+import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
 import { UPLOADS_DIR, ASSETS_DIR, ensureStorageDirs } from '@/lib/storage';
@@ -37,7 +37,6 @@ export async function POST(req: Request) {
     if (!fields.model || !fields.prompt) {
       return json({ error: 'النموذج والبرومبت مطلوبان' }, 400);
     }
-    const db = getDB();
     const wantStream = fields.stream === true || fields.stream === 'true';
     const params = buildParams(fields);
 
@@ -56,14 +55,19 @@ export async function POST(req: Request) {
     }
 
     // Create DB record as pending.
-    recordId = Number(
-      db
-        .prepare(
-          `INSERT INTO generations (user_id, type, model_id, model_name, prompt, params_json, status)
-           VALUES (?, 'image', ?, ?, ?, ?, 'pending')`,
-        )
-        .run(userId, fields.model, fields.model, fields.prompt, JSON.stringify(params)).lastInsertRowid,
-    );
+    const record = await prisma.generation.create({
+      data: {
+        userId,
+        type: 'image',
+        modelId: fields.model,
+        modelName: fields.model,
+        prompt: fields.prompt,
+        paramsJson: JSON.stringify(params),
+        status: 'pending',
+      },
+      select: { id: true },
+    });
+    recordId = record.id;
 
     if (wantStream) {
       return streamImage(recordId, params, t0);
@@ -104,11 +108,16 @@ export async function POST(req: Request) {
     }
     if (saved.length === 0) throw new Error('لم يُرجع الموديل أي صورة');
     const cost = result.usage?.cost ? String(result.usage.cost) : null;
-    const assets = saved.map((s) => s.filename).join(',');
-    const mediaTypes = saved.map((s) => s.media_type).join(',');
-    db.prepare(
-      `UPDATE generations SET status='completed', asset_path=?, asset_media_type=?, cost=?, duration_ms=?, updated_at=datetime('now') WHERE id=?`,
-    ).run(assets, mediaTypes, cost, Date.now() - t0, recordId);
+    await prisma.generation.update({
+      where: { id: recordId },
+      data: {
+        status: 'completed',
+        assetPath: saved.map((s) => s.filename).join(','),
+        assetMediaType: saved.map((s) => s.media_type).join(','),
+        cost,
+        durationMs: Date.now() - t0,
+      },
+    });
 
     return json({
       id: recordId,
@@ -120,13 +129,9 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     if (recordId != null) {
-      try {
-        getDB()
-          .prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`)
-          .run((e as Error).message, recordId);
-      } catch {
-        /* ignore */
-      }
+      await prisma.generation
+        .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
+        .catch(() => {});
       return json({ id: recordId, error: 'فشل توليد الصورة', detail: (e as Error).message }, 502);
     }
     return handleError(e);
@@ -135,7 +140,6 @@ export async function POST(req: Request) {
 
 // SSE streaming — proxies OpenRouter's image stream and persists the final image.
 function streamImage(recordId: number, params: Record<string, unknown>, t0: number): Response {
-  const db = getDB();
   const enc = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -149,7 +153,7 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
         });
         if (!upstream.ok || !upstream.body) {
           const t = await upstream.text();
-          db.prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(t, recordId);
+          await prisma.generation.update({ where: { id: recordId }, data: { status: 'failed', error: t } }).catch(() => {});
           send({ type: 'error', error: { message: t } });
           controller.close();
           return;
@@ -183,15 +187,15 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
                 const fname = `img_${recordId}_0${ext}`;
                 fs.writeFileSync(path.join(ASSETS_DIR, fname), Buffer.from(evt.b64_json, 'base64'));
                 const cost = evt.usage?.cost ? String(evt.usage.cost) : null;
-                db.prepare(
-                  `UPDATE generations SET status='completed', asset_path=?, asset_media_type=?, cost=?, duration_ms=?, updated_at=datetime('now') WHERE id=?`,
-                ).run(fname, mediaType, cost, Date.now() - t0, recordId);
+                await prisma.generation.update({
+                  where: { id: recordId },
+                  data: { status: 'completed', assetPath: fname, assetMediaType: mediaType, cost, durationMs: Date.now() - t0 },
+                });
                 send({ type: 'completed', id: recordId, filename: fname, cost });
               } else if (evt.type === 'error') {
-                db.prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
-                  JSON.stringify(evt.error),
-                  recordId,
-                );
+                await prisma.generation
+                  .update({ where: { id: recordId }, data: { status: 'failed', error: JSON.stringify(evt.error) } })
+                  .catch(() => {});
                 send({ type: 'error', error: evt.error });
               } else {
                 send(evt);
@@ -203,10 +207,9 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
         }
         controller.close();
       } catch (e) {
-        db.prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
-          (e as Error).message,
-          recordId,
-        );
+        await prisma.generation
+          .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
+          .catch(() => {});
         try {
           send({ type: 'error', error: { message: (e as Error).message } });
         } catch {

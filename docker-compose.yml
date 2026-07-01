@@ -1,16 +1,54 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: orms-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=orms
+      - POSTGRES_PASSWORD=orms
+      - POSTGRES_DB=orms
+    volumes:
+      - orms-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orms']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: apply Prisma migrations before the app starts. Uses the builder
+  # image (which has the Prisma CLI + schema), then exits.
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: npm run migrate:deploy
+    environment:
+      - DATABASE_URL=postgresql://orms:orms@db:5432/orms?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+
   web:
     build: .
     container_name: orms-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - '3000:3000'
     environment:
       - JWT_SECRET=change-me-to-a-long-random-string
       - OPENROUTER_API_KEY=your-openrouter-api-key-here
       - APP_REFERER=http://localhost:3000
       - APP_TITLE=OpenRouter Media Studio
       - DATA_DIR=/app/data
+      - DATABASE_URL=postgresql://orms:orms@db:5432/orms?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./data:/app/data
-  # Phase 5 adds a `worker` service (BullMQ video-poll) + redis/postgres here.
+  # Phase 5 adds a `worker` service (BullMQ video-poll) + redis here.
+
+volumes:
+  orms-pgdata:

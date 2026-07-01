@@ -8,23 +8,27 @@ Arabic RTL web studio that generates images and videos from prompts via the **Op
 
 ## Migration status (Next.js monorepo)
 
-A phased migration to a scalable Next.js architecture is underway (see `C:\Users\luqma\.claude\plans\please-inspect-the-project-ticklish-quasar.md`). **Phases 1–2 are done:** the legacy Vite `frontend/` and Express `backend/` have been **removed**; everything now lives in an npm-workspace monorepo:
+A phased migration to a scalable Next.js architecture is underway (see `C:\Users\luqma\.claude\plans\please-inspect-the-project-ticklish-quasar.md`). **Phases 1–3 are done:** the legacy Vite `frontend/` and Express `backend/` have been **removed**; everything now lives in an npm-workspace monorepo:
 - `apps/web` — Next.js 15 App Router (TS strict, Tailwind RTL). UI pages **and** the API (native route handlers in `app/api/**`) on one origin (**:3000**). No CORS, no proxy.
 - `apps/worker` — placeholder for the Phase 5 BullMQ video-poll worker.
 - `packages/openrouter` — typed OpenRouter client (`packages/openrouter/src/index.ts`).
-- `packages/db` — Prisma schema mirroring the SQLite tables (`packages/db/prisma/schema.prisma`); wired up in Phase 3.
+- `packages/db` — **Prisma + PostgreSQL**: schema, client singleton, and migrations (`packages/db/prisma/`). Route handlers use `import { prisma } from '@orms/db'`.
 
-**Not yet migrated (still on the Phase-1/2 stopgaps):** persistence is **`node:sqlite`** (Node's built-in SQLite, `apps/web/lib/db.ts`) — chosen over `better-sqlite3` to avoid a native toolchain and because **Node 22+ is required** for it; assets/uploads are on **local disk** (`apps/web/lib/storage.ts`); the video poller is still **fire-and-forget in-process** (`apps/web/lib/videoPoll.ts`). Phase 3 → Postgres/Prisma, Phase 4 → R2, Phase 5 → BullMQ.
+**Persistence is PostgreSQL via Prisma** (Phase 3 done). `apps/web/lib/serialize.ts` maps Prisma models back to the original snake_case API shape (`created_at`, `asset_urls`, …) so the frontend contract is unchanged. **Not yet migrated:** assets/uploads are still on **local disk** (`apps/web/lib/storage.ts`, Phase 4 → R2); the video poller is still **fire-and-forget in-process** (`apps/web/lib/videoPoll.ts`, Phase 5 → BullMQ). `node:sqlite` survives only in `scripts/migrate-sqlite-to-pg.ts` (one-time SQLite→PG import), which is why **Node 22+ is still required**.
 
 ## Commands
 
-Everything runs from the repo root (npm workspaces):
+Everything runs from the repo root (npm workspaces). `dev`/`build` run `prisma generate` first. Put `DATABASE_URL` (+ `JWT_SECRET`, `OPENROUTER_API_KEY`) in a gitignored `.env`:
 ```bash
 npm install
-JWT_SECRET=... OPENROUTER_API_KEY=sk-or-v1-... npm run dev   # Next dev on http://localhost:3000
-npm run build                                                # production build (.next/standalone)
-npm start                                                    # serve the production build
+npm run dev            # prisma generate + Next dev on http://localhost:3000
+npm run build          # prisma generate + production build (.next/standalone)
+npm start              # serve the production build
+npm run migrate        # prisma migrate dev (create/apply a migration)
+npm run migrate:deploy # apply committed migrations (prod)
+npm run db:seed-from-sqlite   # one-time SQLite→Postgres data import
 ```
+On a hosted Postgres that blocks shadow DBs (e.g. Supabase), use `prisma db push` + a baselined migration instead of `migrate dev` (that's how `packages/db/prisma/migrations/0_init` was created). Supabase needs the **IPv4 session pooler** URL (`...pooler.supabase.com:5432`), not the IPv6-only direct host.
 
 Full stack via Docker (single Next.js container serving UI + API on 3000):
 ```bash
@@ -35,9 +39,9 @@ There is **no test suite or configured linter** — `npm test` will fail. `npm r
 
 ## Architecture
 
-**Request flow:** browser → `apps/web/lib/api.ts` (injects JWT from `localStorage['orms_token']`) → same-origin `/api/*` **route handlers** (`apps/web/app/api/**/route.ts`) → `packages/openrouter` → OpenRouter (`https://openrouter.ai/api/v1`).
+**Request flow:** browser → `apps/web/lib/api.ts` (injects JWT from `localStorage['orms_token']`) → same-origin `/api/*` **route handlers** (`apps/web/app/api/**/route.ts`) → `@orms/db` (Prisma/Postgres) and `packages/openrouter` → OpenRouter (`https://openrouter.ai/api/v1`).
 
-**Route handlers** live under `apps/web/app/api/`: `auth/{register,login,me}`, `models` (+`/image`,`/video`), `generate/{image,video}`, `generate/generations` (+`/[id]`, `/[id]/poll`), `assets/[filename]`, `health`. Shared logic is in `apps/web/lib/`: `db.ts` (`node:sqlite` singleton + inline migrations), `auth.ts` (`sign` + `requireAuth(req)` — throws `AuthError`, no Express middleware), `http.ts` (`json()`, `parseRequest()` for multipart-or-JSON replacing multer, `handleError()`), `storage.ts` (disk paths), `videoPoll.ts` (background poll). All handlers set `runtime='nodejs'` + `dynamic='force-dynamic'`.
+**Route handlers** live under `apps/web/app/api/`: `auth/{register,login,me}`, `models` (+`/image`,`/video`), `generate/{image,video}`, `generate/generations` (+`/[id]`, `/[id]/poll`), `assets/[filename]`, `health`. Shared logic is in `apps/web/lib/`: `auth.ts` (`sign` + `requireAuth(req)` — throws `AuthError`, no Express middleware), `http.ts` (`json()`, `parseRequest()` for multipart-or-JSON replacing multer, `handleError()`), `serialize.ts` (Prisma → snake_case API shape), `storage.ts` (disk paths), `videoPoll.ts` (background poll). DB access is `import { prisma } from '@orms/db'`. All handlers set `runtime='nodejs'` + `dynamic='force-dynamic'`. Prisma is external (`serverExternalPackages` in `next.config.ts`), and the Docker runner copies `.prisma`/`@prisma` so the query engine is present at runtime.
 
 **Generation is the core, and the three modes differ fundamentally:**
 - **Image, sync** (`POST /api/generate/image`) — calls OpenRouter, decodes `b64_json`, sniffs magic bytes (Gemini mislabels JPEG as PNG), writes to `ASSETS_DIR`, returns immediately.
@@ -46,7 +50,7 @@ There is **no test suite or configured linter** — `npm test` will fail. `npm r
 
 Reference images: sent as multipart `image`, parsed by `parseRequest()`, written to `UPLOADS_DIR`, and inlined as base64 data URLs (`orouter.bufferToDataUrl`) — as `input_references` for image-to-image, or `frame_images` (`first_frame`) for image-to-video. No separate upload endpoint.
 
-**Persistence:** every generation is one `generations` row (schema + migrations inline in `apps/web/lib/db.ts`), tracked through `status` (`pending`→`in_progress`→`completed`/`failed`). `asset_path` is a **comma-separated** list of filenames served by `GET /api/assets/:file`; routes split it into `asset_urls`. All rows are scoped by `user_id` — history and detail queries always filter on the JWT's user.
+**Persistence:** PostgreSQL via Prisma (`packages/db/prisma/schema.prisma`; models `User`, `Generation`, `UploadedImage`, `ModelCache`). Every generation is one `Generation` row, tracked through `status` (`pending`→`in_progress`→`completed`/`failed`). `assetPath` is a **comma-separated** list of filenames; `serializeGeneration` turns it into `asset_urls` (served by `GET /api/assets/:file`) and maps camelCase→snake_case. All rows are scoped by `userId` — history/detail queries always filter on the JWT's user (`findFirst({ where: { id, userId } })`).
 
 **Model lists** are fetched from OpenRouter and cached in-process for 1 hour (`packages/openrouter`), keyed by image vs video.
 
@@ -66,8 +70,8 @@ Run the Design QA checklist (§28) before considering UI work done.
 
 ## Deployment (self-hosted, not serverless)
 
-Deploy as a **single long-running container** (`Dockerfile` builds the Next.js `standalone` output; `docker-compose.yml` runs it on :3000 with `./data:/app/data`). Target a container host (Render/Railway/Fly/VPS) with a persistent volume at `/app/data`. **Do not use Vercel serverless** while the app still relies on `node:sqlite`, local-disk assets, and the in-process video poll — those need a stateful long-running server (Phases 3–5 remove those constraints). The base image is **`node:24`** because `node:sqlite` needs Node 22+. See `DEPLOY.md`.
+Deploy as a **single long-running container** (`Dockerfile` builds the Next.js `standalone` output; `docker-compose.yml` runs `db` (Postgres) → `migrate` (one-shot `prisma migrate deploy`) → `web` on :3000 with `./data:/app/data`). Target a container host (Render/Railway/Fly/VPS) with managed Postgres + a persistent volume at `/app/data` (still needed for local-disk assets until Phase 4 → R2). **Do not use Vercel serverless** while the app still relies on local-disk assets and the in-process video poll. Base image is **`node:24`**. The Docker changes for Phase 3 (Prisma engine copy, `migrate` service) were **not built locally** (no Docker daemon in the dev env) — verify with `docker compose build` before deploying. See `DEPLOY.md`.
 
 ## Environment variables
 
-`OPENROUTER_API_KEY` (required for generation/models), `JWT_SECRET` (defaults to an insecure dev value — set it in prod), `PORT` (3000), `HOSTNAME` (0.0.0.0 in Docker), `DATA_DIR` (root for the DB + uploads + assets; defaults to `<app cwd>/data`), or override individually with `DB_PATH`/`UPLOADS_DIR`/`ASSETS_DIR`, and `APP_REFERER`/`APP_TITLE` (sent as OpenRouter `HTTP-Referer`/`X-Title`). No `CORS_ORIGIN` — the API is same-origin now. Phase 3+ adds `DATABASE_URL` / `REDIS_URL`.
+`DATABASE_URL` (**required** — Postgres; on Supabase use the IPv4 session-pooler host), `OPENROUTER_API_KEY` (required for generation/models), `JWT_SECRET` (defaults to an insecure dev value — set it in prod), `PORT` (3000), `HOSTNAME` (0.0.0.0 in Docker), `DATA_DIR` (root for uploads + assets; defaults to `<app cwd>/data`) or override with `UPLOADS_DIR`/`ASSETS_DIR`, and `APP_REFERER`/`APP_TITLE` (sent as OpenRouter `HTTP-Referer`/`X-Title`). No `CORS_ORIGIN` — same-origin. Phase 5 adds `REDIS_URL`.

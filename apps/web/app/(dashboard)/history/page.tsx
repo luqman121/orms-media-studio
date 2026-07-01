@@ -101,7 +101,7 @@ export default function HistoryPage() {
                   {it.prompt || '—'}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', direction: 'ltr' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{new Date(it.created_at + 'Z').toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{new Date(it.created_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}</div>
                   <div style={{ display: 'flex', gap: '0.3rem' }}>
                     {previewUrl && it.status === 'completed' && (
                       <button onClick={() => downloadAsset(previewUrl, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)} title="تنزيل" style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: 9, padding: '0.35rem', color: 'var(--text-primary)', cursor: 'pointer' }}><Download size={14} /></button>
