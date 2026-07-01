@@ -1682,3 +1682,29 @@ ORMS should look like a premium dark AI creation studio:
 - **Arabic UX:** RTL-native, clear, direct, and conversion-focused.
 
 The final product should feel like: **“Guru-style creative AI landing page + ORMS purple/blue identity + professional SaaS dashboard.”**
+
+---
+
+## 31. Implementation Addendum (frontend upgrade)
+
+Documented here per §29 — additions made while implementing the design system in `apps/web`. These extend, and stay consistent with, the tokens and rules above.
+
+### 31.1 Fonts (locks §4.1)
+Primary UI font is **IBM Plex Sans Arabic** (with `Tajawal`/`Cairo` fallbacks); display headings use **Sora** via the `.font-display` class / `font-display` Tailwind family. Loaded in `app/layout.tsx`.
+
+### 31.2 Reusable primitives (`components/ui/`)
+Canonical implementations of §20's UI list: `Button` (primary/secondary/ghost/danger × sm/md/lg, loading state), `Card` (`featured`/`hover`), `Badge` (`default|success|cyan|warning|danger`), `Field`+`Input`/`Select`/`Textarea` (always-labelled per §16), `Tabs` (segmented, §9.4), `Skeleton` (§13), and `Logo` (§8). **Build on these — do not re-inline styles.**
+
+### 31.3 Token-driven utility classes (`globals.css`)
+All tokens from §18/§19 are now live as CSS variables + component classes: `.card`/`.card-featured`/`.card-hover`, `.btn-primary`/`.btn-secondary`/`.btn-ghost`, `.field`/`.prompt-box`, `.badge*`, `.segmented`, `.skeleton`, `.bg-grid`(+`.bg-grid-fade`), `.glow-orb`, `.gen-border-active` (animated gradient border for the generating canvas, §12.3). Legacy `.glass`/`.btn-brand` remain as aliases.
+
+### 31.4 New motion utilities (extends §14.2)
+Tailwind animations added: `animate-fade-up` (section reveal), `animate-float`/`animate-float-slow` (floating hero cards), `animate-drift-gradient` (hero glow orbs), `animate-pulse-glow`, `animate-marquee` (model strip), `animate-shimmer` (skeleton/gradient border). All respect `prefers-reduced-motion` via a global reset in `globals.css`.
+
+### 31.5 `GradientArt` placeholder pattern
+Where real generated media is unavailable (landing gallery/use-cases, empty history/dashboard thumbnails), use `components/ui/GradientArt` — deterministic layered mesh gradients built strictly from palette colors (§3) + a grid overlay. This keeps empty surfaces intentional and on-brand instead of gray placeholders. Replace with real assets when available.
+
+### 31.6 Routing map
+- `/` — **marketing landing** (Navbar, Hero+prompt preview, model strip, use cases, features, prompt builder, gallery, pricing, FAQ, final CTA, footer). CTAs route into the app.
+- `/auth` — login/register.
+- App (auth-guarded, `DashboardShell`): `/dashboard` (usage stats + recent work, wired to `GET /api/users/me/usage`), `/generate` (generator studio), `/history`, `/settings` (account + usage summary). Pricing/billing is marketing-only (no billing backend); the settings "upgrade" CTA links to `/#pricing`.

@@ -1,9 +1,26 @@
 'use client';
-// Ported from frontend/src/pages/GeneratePage.jsx.
+// Generator studio. UI rebuilt on the ORMS design system; all generation logic
+// (model loading, image sync/streaming, async video poll, params) is unchanged
+// and calls the exact same API contracts as before.
 import { useState, useRef, useEffect, useCallback, type ChangeEvent } from 'react';
-import { Image as ImageIcon, Video as VideoIcon, Upload, Download, RefreshCw, Loader2, Sparkles, Wallpaper, AlertCircle, CheckCircle2, X } from 'lucide-react';
+import {
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Upload,
+  Download,
+  RefreshCw,
+  Sparkles,
+  Wallpaper,
+  AlertCircle,
+  CheckCircle2,
+  X,
+} from 'lucide-react';
 import { api, getToken } from '../../../lib/api';
-import Spinner from '../../../components/Spinner';
+import Card from '../../../components/ui/Card';
+import Button from '../../../components/ui/Button';
+import Tabs from '../../../components/ui/Tabs';
+import { Field, Select } from '../../../components/ui/Field';
+import Skeleton from '../../../components/ui/Skeleton';
 
 const modelsURL = '/api/models';
 
@@ -256,202 +273,222 @@ export default function GeneratePage() {
 
   return (
     <div className="gen-layout">
-      {/* LEFT — controls */}
-      <div className="glass glass-mobile-sm">
-        <div style={{ marginBottom: '1.2rem' }}>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 0.3rem' }}>إنشاء جديد</h2>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem' }}>اختر النوع، الموديل، اكتب البرومبت — واحصل على النتيجة بخطوة واحدة</p>
+      {/* SETTINGS (right in RTL) */}
+      <Card className="glass-mobile-sm">
+        <div className="mb-5">
+          <h2 className="font-display text-xl font-extrabold text-text-100">إنشاء جديد</h2>
+          <p className="mt-1 text-sm text-text-400">اختر النوع والنموذج، اكتب البرومبت — واحصل على النتيجة بخطوة واحدة.</p>
         </div>
 
-        {/* Mode toggle */}
-        <div style={{ display: 'flex', background: 'rgba(15,13,28,0.6)', padding: 4, borderRadius: 14, marginBottom: '1.3rem' }}>
-          <button onClick={() => setMode('image')} disabled={running} style={{ flex: 1, padding: '0.7rem', borderRadius: 11, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.95rem',
-            background: mode === 'image' ? 'linear-gradient(120deg,#7c3aed,#8b5cf6)' : 'transparent', color: mode === 'image' ? 'white' : 'var(--text-secondary)', transition: 'all .2s' }}>
-            <ImageIcon size={18} /> توليد صورة
-          </button>
-          <button onClick={() => setMode('video')} disabled={running} style={{ flex: 1, padding: '0.7rem', borderRadius: 11, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.95rem',
-            background: mode === 'video' ? 'linear-gradient(120deg,#22d3ee,#0ea5e9)' : 'transparent', color: mode === 'video' ? 'white' : 'var(--text-secondary)' }}>
-            <VideoIcon size={18} /> توليد فيديو
-          </button>
-        </div>
+        <Tabs
+          ariaLabel="نوع التوليد"
+          className="mb-5"
+          value={mode}
+          onChange={setMode}
+          disabled={running}
+          items={[
+            { value: 'image', label: 'توليد صورة', icon: <ImageIcon size={16} /> },
+            { value: 'video', label: 'توليد فيديو', icon: <VideoIcon size={16} /> },
+          ]}
+        />
 
-        {/* Model selector */}
-        <div style={{ marginBottom: '1rem' }}>
-          <label className="lbl">الموديل</label>
-          {modelsLoading ? (
-            <Spinner label="جلب القوائم..." />
-          ) : modelsError ? (
-            <div style={{ color: '#fda4af', fontSize: '0.85rem' }}>{modelsError}</div>
-          ) : (
-            <select className="field" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={running}>
-              {(mode === 'image' ? models.images : models.videos).map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          )}
-          {currentModel && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.4rem', direction: 'ltr', textAlign: 'right' }}>{currentModel.id}</div>}
+        {/* Model */}
+        <div className="mb-4">
+          <Field label="النموذج" htmlFor="model-select" hint={currentModel ? <span dir="ltr">{currentModel.id}</span> : undefined}>
+            {modelsLoading ? (
+              <Skeleton className="h-[50px]" />
+            ) : modelsError ? (
+              <div className="flex items-center gap-2 rounded-mdx border border-[rgba(255,92,122,0.3)] bg-[rgba(255,92,122,0.1)] px-3 py-2.5 text-sm text-[#fda4af]">
+                <AlertCircle size={15} /> {modelsError}
+              </div>
+            ) : (
+              <Select id="model-select" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={running}>
+                {curModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
         </div>
 
         {/* Prompt */}
-        <div style={{ marginBottom: '1rem' }}>
-          <label className="lbl">البرومبت</label>
-          <textarea className="field" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={running} placeholder={mode === 'image' ? 'اصف الصورة اللي تريدها...' : 'اصف المشهد اللي تريده في الفيديو...'} style={{ resize: 'vertical' }} />
+        <div className="mb-4">
+          <label className="lbl" htmlFor="prompt">البرومبت</label>
+          <textarea
+            id="prompt"
+            className="prompt-box !min-h-[120px]"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={running}
+            placeholder={mode === 'image' ? 'اكتب وصف الصورة التي تريد إنشاءها...' : 'اكتب مشهد الفيديو، الحركة، الإضاءة، والأسلوب...'}
+          />
         </div>
 
-        {/* Params grid */}
-        <div className="param-grid" style={{ marginBottom: '1rem' }}>
+        {/* Params */}
+        <div className="param-grid mb-4">
           {mode === 'image' && supportedKeys.includes('n') && (
-            <div>
-              <label className="lbl">عدد الصور (n)</label>
-              <select className="field" value={n} onChange={(e) => setN(Number(e.target.value))} disabled={running}>
+            <Field label="عدد الصور">
+              <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={running}>
                 {[1, 2, 3, 4].map((x) => (
                   <option key={x} value={x}>{x}</option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           )}
           {mode === 'video' && (
-            <div>
-              <label className="lbl">المدة (ثانية)</label>
+            <Field label="المدة (ثانية)">
               <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={running} placeholder="تلقائي" />
-            </div>
+            </Field>
           )}
           {(mode === 'image' && supportedKeys.includes('resolution')) || mode === 'video' ? (
-            <div>
-              <label className="lbl">الدقة</label>
-              <select className="field" value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={running}>
+            <Field label="الدقة">
+              <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={running}>
                 <option value="">تلقائي</option>
                 {(mode === 'video' ? videoResolutionLabels : imageResolutions).map((r) => (
                   <option key={r} value={r}>{r}</option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           ) : null}
-          <div>
-            <label className="lbl">نسبة الأبعاد</label>
-            <select className="field" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={running}>
+          <Field label="نسبة الأبعاد">
+            <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={running}>
               <option value="">تلقائي</option>
               {ratioOptions.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
-            </select>
-          </div>
+            </Select>
+          </Field>
           {mode === 'image' && supportedKeys.includes('quality') && (
-            <div>
-              <label className="lbl">الجودة</label>
-              <select className="field" value={quality} onChange={(e) => setQuality(e.target.value)} disabled={running}>
+            <Field label="الجودة">
+              <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={running}>
                 <option value="">تلقائي</option>
                 {['low', 'medium', 'high', 'auto'].map((q) => (
                   <option key={q} value={q}>{q}</option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           )}
           {mode === 'image' && supportedKeys.includes('output_format') && (
-            <div>
-              <label className="lbl">الصيغة</label>
-              <select className="field" value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={running}>
+            <Field label="الصيغة">
+              <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={running}>
                 <option value="">تلقائي (PNG)</option>
                 <option value="png">PNG</option>
                 <option value="jpeg">JPEG</option>
                 <option value="webp">WebP</option>
-              </select>
-            </div>
+              </Select>
+            </Field>
           )}
         </div>
 
-        {/* Reference image (img2img / image-to-video) */}
-        <div style={{ marginBottom: '1.2rem' }}>
+        {/* Reference image */}
+        <div className="mb-5">
           <label className="lbl">صورة مرجعية (اختياري) — {mode === 'image' ? 'img2img' : 'image-to-video'}</label>
           {!referenceImage ? (
             <>
-              <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} style={{ display: 'none' }} />
-              <button onClick={() => filePRef.current?.click()} disabled={running} style={{ width: '100%', padding: '1rem', borderRadius: 14, border: '1.5px dashed rgba(124,58,237,0.4)', background: 'rgba(124,58,237,0.06)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', fontSize: '0.9rem' }}>
+              <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} className="hidden" />
+              <button
+                onClick={() => filePRef.current?.click()}
+                disabled={running}
+                className="flex w-full items-center justify-center gap-2 rounded-mdx border border-dashed border-[rgba(134,79,242,0.4)] bg-[rgba(134,79,242,0.06)] px-4 py-4 text-sm text-text-400 transition-colors hover:bg-[rgba(134,79,242,0.1)] disabled:opacity-50"
+              >
                 <Upload size={18} /> ارفع صورة مرجعية
               </button>
             </>
           ) : (
-            <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
-              <img src={refPreview} alt="ref" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', display: 'block' }} />
-              <button onClick={clearRef} disabled={running} style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.7)', color: 'white', border: 'none', borderRadius: 10, padding: '0.4rem 0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem' }}>
+            <div className="relative overflow-hidden rounded-mdx border border-[rgba(169,154,241,0.14)]">
+              <img src={refPreview} alt="مرجع" className="block max-h-52 w-full object-cover" />
+              <button
+                onClick={clearRef}
+                disabled={running}
+                className="absolute left-2 top-2 flex items-center gap-1.5 rounded-mdx bg-black/70 px-2.5 py-1.5 text-xs text-white"
+              >
                 <X size={14} /> حذف
               </button>
             </div>
           )}
         </div>
 
-        {/* Image-only: streaming toggle */}
+        {/* Streaming toggle */}
         {mode === 'image' && supportsStream && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.2rem', padding: '0.7rem 1rem', background: 'rgba(34,211,238,0.06)', borderRadius: 12, border: '1px solid rgba(34,211,238,0.2)' }}>
-            <input type="checkbox" id="stream-cb" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={running} />
-            <label htmlFor="stream-cb" style={{ fontSize: '0.88rem', cursor: 'pointer' }}>
-              <Sparkles size={14} style={{ display: 'inline', marginLeft: 6 }} />
-              السحب المباشر (Streaming) — يعرض الصورة تدريجياً أثناء التوليد
-            </label>
-          </div>
+          <label className="mb-5 flex cursor-pointer items-center gap-2.5 rounded-mdx border border-[rgba(54,196,240,0.2)] bg-[rgba(54,196,240,0.06)] px-3.5 py-2.5">
+            <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={running} className="accent-[#36C4F0]" />
+            <span className="text-sm text-text-200">
+              <Sparkles size={14} className="ml-1.5 inline text-cyan-500" />
+              السحب المباشر (Streaming) — يعرض الصورة تدريجيًا أثناء التوليد
+            </span>
+          </label>
         )}
 
-        {/* Submit */}
-        <button onClick={submit} disabled={running || !prompt || modelsLoading} className="btn-brand" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}>
-          {running ? <Loader2 size={18} className="spin-slow" /> : mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}
+        <Button fullWidth size="lg" onClick={submit} loading={running} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
           {running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
           <span className="shine" />
-        </button>
+        </Button>
 
         {error && (
-          <div style={{ marginTop: '1rem', padding: '0.8rem 1rem', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 12, color: '#fda4af', fontSize: '0.88rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="mt-4 flex items-center gap-2 rounded-mdx border border-[rgba(255,92,122,0.3)] bg-[rgba(255,92,122,0.1)] px-3.5 py-3 text-sm text-[#fda4af]">
             <AlertCircle size={16} /> {error}
           </div>
         )}
-      </div>
+      </Card>
 
-      {/* RIGHT — result */}
-      <div className="glass glass-mobile-sm" style={{ minHeight: 420, display: 'flex', flexDirection: 'column' }}>
-        <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>النتيجة</h3>
+      {/* PREVIEW (left in RTL) */}
+      <Card className={`glass-mobile-sm flex min-h-[440px] flex-col ${running ? 'gen-border-active' : ''}`}>
+        <h3 className="mb-4 font-display text-lg font-bold text-text-100">النتيجة</h3>
 
         {running && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
-            <div className="spin-slow" style={{ width: 60, height: 60, borderRadius: '50%', border: '4px solid rgba(124,58,237,0.18)', borderTopColor: 'var(--accent)' }} />
-            <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>{pollingText || 'جاري التوليد...'}</div>
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+            <div className="spin-slow h-16 w-16 rounded-full" style={{ border: '4px solid rgba(134,79,242,0.18)', borderTopColor: 'var(--primary-500)' }} />
+            <div className="text-sm text-text-400">{pollingText || 'جاري التوليد...'}</div>
             {mode === 'image' && useStreaming && supportsStream && partialProgress > 0 && (
-              <div style={{ fontSize: '0.82rem', color: '#22d3ee' }}>تم استلام {partialProgress} تحديثاً...</div>
+              <div className="text-xs text-cyan-500">تم استلام {partialProgress} تحديثًا...</div>
             )}
           </div>
         )}
 
         {!running && !result && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.7rem', color: 'var(--text-secondary)' }}>
-            <Wallpaper size={48} color="rgba(180,172,207,0.4)" />
-            <div style={{ fontSize: '0.9rem' }}>النتيجة ستظهر هنا بعد التوليد</div>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-[rgba(134,79,242,0.1)]">
+              <Wallpaper size={30} className="text-text-400/60" />
+            </span>
+            <div className="text-sm text-text-400">النتيجة ستظهر هنا بعد التوليد</div>
+            <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+              {['سينمائي', 'واقعي', 'إعلان منتج', '3D'].map((t) => (
+                <span key={t} className="badge">{t}</span>
+              ))}
+            </div>
           </div>
         )}
 
         {result && !running && (
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.8rem', fontSize: '0.85rem', color: '#86efac' }}>
-              <CheckCircle2 size={16} /> تم بنجاح {result.cost && <>— التكلفة: ${Number(result.cost).toFixed(4)}</>}
+          <div className="flex-1">
+            <div className="mb-3 flex items-center gap-2 text-sm text-success-500">
+              <CheckCircle2 size={16} /> تم بنجاح {result.cost != null && <>— التكلفة: ${Number(result.cost).toFixed(4)}</>}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: result.assets.length > 1 ? '1fr 1fr' : '1fr', gap: '1rem' }}>
+            <div className={`grid gap-4 ${result.assets.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
               {result.assets.map((a, i) => (
-                <div key={i} style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--border-subtle)', background: '#0a070f' }}>
+                <div key={i} className="relative overflow-hidden rounded-mdx border border-[rgba(169,154,241,0.14)] bg-bg-950">
                   {mode === 'image' ? (
-                    <img src={a} alt={`res-${i}`} style={{ width: '100%', display: 'block' }} />
+                    <img src={a} alt={`نتيجة ${i + 1}`} className="block w-full" />
                   ) : (
-                    <video src={a} controls playsInline style={{ width: '100%', display: 'block' }} />
+                    <video src={a} controls playsInline className="block w-full" />
                   )}
-                  <a href={a} download onClick={(e) => { e.preventDefault(); downloadAsset(a, `result-${result.id}-${i}.${mode === 'image' ? 'png' : 'mp4'}`); }}
-                    style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.7)', color: 'white', borderRadius: 10, padding: '0.4rem 0.7rem', textDecoration: 'none', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <button
+                    onClick={() => downloadAsset(a, `orms-${result.id}-${i}.${mode === 'image' ? 'png' : 'mp4'}`)}
+                    className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-mdx bg-black/70 px-2.5 py-1.5 text-xs text-white"
+                  >
                     <Download size={14} /> تنزيل
-                  </a>
+                  </button>
                 </div>
               ))}
             </div>
-            <button onClick={() => setResult(null)} className="btn-brand" style={{ marginTop: '1.2rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.55rem 1.2rem', fontSize: '0.88rem' }}>
-              <RefreshCw size={14} /> توليد آخر
-            </button>
+            <Button variant="secondary" size="sm" className="mt-5" onClick={() => setResult(null)} leftIcon={<RefreshCw size={14} />}>
+              توليد آخر
+            </Button>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

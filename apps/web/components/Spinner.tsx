@@ -1,9 +1,12 @@
-// Ported from frontend/src/components/Spinner.jsx.
+// Centered loading spinner using the ORMS palette.
 export default function Spinner({ label }: { label?: string }) {
   return (
-    <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.7rem' }}>
-      <div className="spin-slow" style={{ width: 42, height: 42, borderRadius: '50%', border: '3px solid rgba(124,58,237,0.2)', borderTopColor: 'var(--accent)' }} />
-      {label && <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{label}</div>}
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
+      <div
+        className="spin-slow h-11 w-11 rounded-full"
+        style={{ border: '3px solid rgba(134,79,242,0.2)', borderTopColor: 'var(--primary-500)' }}
+      />
+      {label && <div className="text-sm text-text-400">{label}</div>}
     </div>
   );
 }
