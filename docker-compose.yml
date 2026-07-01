@@ -55,6 +55,12 @@ services:
       - R2_ACCESS_KEY_ID=your-r2-access-key-id
       - R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
       - R2_BUCKET=orms-assets
+      # Phase 6: Sentry (optional) — uncomment and fill in when deploying.
+      # - SENTRY_DSN=https://your-key@oXXX.ingest.sentry.io/YYYY
+      # - NEXT_PUBLIC_SENTRY_DSN=https://your-key@oXXX.ingest.sentry.io/YYYY
+      # Phase 6: Upstash rate limiting (optional).
+      # - UPSTASH_REDIS_REST_URL=https://your-db.upstash.io
+      # - UPSTASH_REDIS_REST_TOKEN=your-token-here
     depends_on:
       db:
         condition: service_healthy
