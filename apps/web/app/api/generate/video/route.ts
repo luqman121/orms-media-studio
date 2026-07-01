@@ -1,13 +1,11 @@
-// Ported from backend/src/routes/generate.js — POST /api/generate/video
+// POST /api/generate/video
 // Submits an async video job, responds immediately, then polls + downloads in the
 // background (fire-and-forget; Phase 5 replaces this with a durable BullMQ worker).
-import fs from 'node:fs';
-import path from 'node:path';
+// Phase 4: reference image is inlined as base64 — no disk write needed.
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
-import { UPLOADS_DIR, ensureStorageDirs } from '@/lib/storage';
 import { pollAndDownloadVideo } from '@/lib/videoPoll';
 
 export const runtime = 'nodejs';
@@ -27,20 +25,16 @@ export async function POST(req: Request) {
       if (v !== undefined && v !== '') {
         if (k === 'duration') {
           const num = Number(v);
-          if (!Number.isNaN(num)) params[k] = num; // skip non-numeric instead of forwarding NaN
+          if (!Number.isNaN(num)) params[k] = num;
         } else {
           params[k] = v;
         }
       }
     }
 
-    // Optional first-frame image for image-to-video.
+    // Optional first-frame image for image-to-video — inline as base64, no disk write.
     if (file) {
       try {
-        ensureStorageDirs();
-        const ext = (path.extname(file.filename) || '.png').toLowerCase();
-        const upName = `up_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-        fs.writeFileSync(path.join(UPLOADS_DIR, upName), file.buffer);
         const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
         params.frame_images = [{ type: 'image_url', image_url: { url: dataUrl }, frame_type: 'first_frame' }];
       } catch {
@@ -70,7 +64,6 @@ export async function POST(req: Request) {
       data: { status: 'pending', jobId, pollingUrl },
     });
 
-    // Fire-and-forget background poll to auto-update.
     pollAndDownloadVideo(recordId, jobId, t0).catch((e) => {
       console.error('background poll failed:', (e as Error).message);
     });
