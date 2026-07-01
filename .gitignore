@@ -7,10 +7,6 @@
 node_modules/
 npm-debug.log*
 
-# Build output
-frontend/dist/
-backend/public/
-
 # Next.js
 apps/web/.next/
 apps/web/out/

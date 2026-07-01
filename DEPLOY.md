@@ -1,90 +1,65 @@
 # Deployment Guide — OpenRouter Media Studio
 
-This project has **two parts**:
+The app is now a **single Next.js 15 application** (`apps/web`) that serves the UI **and** the API from one origin. Deploy it as **one long-running container**.
 
-| Part | Tech | Where it can run |
-|------|------|------------------|
-| `frontend/` | Vite + React static SPA | ✅ **Vercel** (or any static host) |
-| `backend/`  | Express + **better-sqlite3** + local-disk storage + background jobs | ❌ **Not Vercel** — needs a long-running container |
+| Part | Tech | Where it runs |
+|------|------|---------------|
+| `apps/web` | Next.js 15 (UI + API route handlers) | Container host (Render / Railway / Fly.io / VPS) with a persistent volume |
 
-## Why the backend cannot run on Vercel
+## Why not Vercel serverless (yet)
 
-Vercel runs **stateless serverless functions**, not long-lived servers. This backend is fundamentally stateful and therefore incompatible:
+Vercel runs **stateless serverless functions**. The current app is still stateful and needs a long-running server:
 
-1. **Native module** — `better-sqlite3` is a compiled C++ addon backed by a real file on disk.
-2. **Persistent local filesystem** — uploads, generated images, and the SQLite DB are written under `data/`. On Vercel the filesystem is **read-only** (except an ephemeral `/tmp`) and is **wiped between invocations**, so every user, asset, and history record would vanish on the next cold start.
-3. **Background work** — video generation fires a 15-minute `pollAndDownloadVideo()` task *after* the HTTP response is sent (`backend/src/routes/generate.js`). A serverless function is frozen/killed the moment it responds, so the poll never finishes.
-4. **`app.listen()`** — the backend opens a TCP port and runs continuously; Vercel expects an exported request handler instead.
+1. **`node:sqlite`** — the DB is a file on local disk (`apps/web/lib/db.ts`).
+2. **Local-disk assets** — uploads + generated images/videos are written under `data/` (`apps/web/lib/storage.ts`); a serverless filesystem is ephemeral and wiped between invocations.
+3. **Background work** — video generation runs a ~15-minute `pollAndDownloadVideo()` *after* the HTTP response (`apps/web/lib/videoPoll.ts`); a serverless function is frozen the moment it responds.
 
-> These are not bugs — the app is correctly written for a normal server. It just needs a server. **No backend or frontend source code was changed**; only deployment configuration was added.
+Phases 3–5 of the migration (Postgres, R2 object storage, BullMQ queue) remove these constraints and make serverless viable. Until then, self-host.
 
-## Recommended architecture
+> **Node 22+ is required** (the API uses the built-in `node:sqlite`). The `Dockerfile` uses `node:24`.
+
+## Architecture
 
 ```
-  Browser ──▶ Vercel (frontend static SPA)
-                 │  /api/*  (rewrite proxy, see vercel.json)
-                 ▼
-            Backend container  (Render / Railway / Fly.io / VPS)
+  Browser ──▶ Next.js container (UI + /api/* on one origin, no CORS)
                  │
                  ▼
-            OpenRouter API
+            OpenRouter API (https://openrouter.ai/api/v1)
 ```
 
----
+## Deploy the container
 
-## Step 1 — Deploy the backend (container host)
+The repo ships a production `Dockerfile` (Next.js `standalone` output) and `docker-compose.yml`. Deploy to any host that runs containers with a **persistent volume mounted at `/app/data`**:
 
-The repo already ships a production `Dockerfile` and `docker-compose.yml`. Deploy that image to any host that runs containers with a persistent volume:
-
-- **Render** → New ▸ Web Service ▸ "Deploy from a Dockerfile", add a Persistent Disk mounted at `/app/data`.
+- **Render** → New ▸ Web Service ▸ "Deploy from a Dockerfile", add a Persistent Disk at `/app/data`.
 - **Railway** → New ▸ Deploy from repo (uses the Dockerfile), add a Volume at `/app/data`.
 - **Fly.io** → `fly launch` (detects the Dockerfile), `fly volumes create data`, mount at `/app/data`.
 
-Set these environment variables on the backend service:
+Set these environment variables:
 
 | Variable | Value |
 |----------|-------|
 | `OPENROUTER_API_KEY` | your key from https://openrouter.ai/keys |
-| `JWT_SECRET` | a long random hex string |
-| `APP_REFERER` | your Vercel URL, e.g. `https://your-app.vercel.app` |
+| `JWT_SECRET` | a long random hex string (**required in prod**) |
+| `APP_REFERER` | your public URL, e.g. `https://your-app.onrender.com` |
 | `APP_TITLE` | `OpenRouter Media Studio` |
+| `DATA_DIR` | `/app/data` (DB + uploads + assets live here) |
 
-Note the backend's **public URL** (e.g. `https://orms-backend.onrender.com`).
+The container listens on **:3000** (`PORT`, `HOSTNAME=0.0.0.0`).
 
-## Step 2 — Point the frontend at the backend
-
-Open [`vercel.json`](./vercel.json) and replace the placeholder host in the `/api` rewrite:
-
-```json
-{ "source": "/api/:path*", "destination": "https://orms-backend.onrender.com/api/:path*" }
-```
-
-The frontend calls the backend with **relative `/api/...` URLs**, so this rewrite is all that is needed — no frontend code changes. Because requests now arrive same-origin (`/api` on the Vercel domain), CORS is a non-issue.
-
-> SSE image streaming and binary video downloads pass straight through a Vercel rewrite, so live generation and downloads keep working.
-
-## Step 3 — Deploy the frontend to Vercel
-
-1. Import the GitHub repo into Vercel.
-2. Vercel reads `vercel.json` automatically:
-   - **Build:** `npm --prefix frontend ci && npm --prefix frontend run build`
-   - **Output:** `frontend/dist`
-   - **Routing:** SPA fallback to `/index.html` so deep links like `/history` work.
-3. Deploy. (No env vars are required on Vercel itself — the backend holds the secrets.)
-
-That's it. The Vercel domain serves the UI and transparently proxies `/api/*` to your backend.
-
----
-
-## Alternative — one-box deploy (no Vercel)
-
-If you prefer a single deployment, the existing Docker setup already serves the built frontend **and** the API from one container on port 3001:
+## Local one-box deploy
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-xxxx
 export JWT_SECRET=$(openssl rand -hex 32)
 docker compose up --build -d
-# open http://localhost:3001
+# open http://localhost:3000
 ```
 
-This is the simplest path if you don't specifically need Vercel.
+## Local development (no Docker)
+
+```bash
+npm install
+JWT_SECRET=$(openssl rand -hex 32) OPENROUTER_API_KEY=sk-or-v1-xxxx npm run dev
+# open http://localhost:3000
+```

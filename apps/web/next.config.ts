@@ -1,26 +1,19 @@
 import type { NextConfig } from 'next';
+import path from 'node:path';
 
-// Phase 1: proxy /api/* to the still-running Express backend so the UI is a pure
-// transplant with zero backend change. Phases 2+ replace these with native route
-// handlers, and this rewrites() block is removed.
-const backendOrigin = process.env.BACKEND_ORIGIN || 'http://localhost:3001';
-
+// Phase 2: the API now lives in native route handlers (app/api/**). The Express
+// backend and the /api/* rewrite are gone. Persistence uses Node's built-in
+// `node:sqlite` (DatabaseSync) — no native addon to bundle/compile. Phase 3 swaps
+// SQLite for Postgres/Prisma.
 const nextConfig: NextConfig = {
   // Self-hosted long-running server output (container deploy, not serverless).
   output: 'standalone',
-  // Transpile the shared workspace packages directly from TS source (no build step).
+  // Trace from the monorepo root so the standalone bundle includes workspace packages.
+  outputFileTracingRoot: path.join(process.cwd(), '..', '..'),
+  // Transpile shared workspace packages directly from TS source (no build step).
   transpilePackages: ['@orms/openrouter', '@orms/db'],
   eslint: {
-    // Lint is run separately; don't block builds on it during the migration.
     ignoreDuringBuilds: true,
-  },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${backendOrigin}/api/:path*`,
-      },
-    ];
   },
 };
 

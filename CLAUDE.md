@@ -4,56 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Arabic RTL web studio that generates images and videos from prompts via the **OpenRouter API**. Two separately-deployed parts: a Vite/React SPA (`frontend/`) and an Express + SQLite backend (`backend/`). The UI text and error messages are in Arabic — keep new user-facing strings Arabic to match.
+Arabic RTL web studio that generates images and videos from prompts via the **OpenRouter API**. A single **Next.js 15** app (`apps/web`) serves both the UI and the API, backed by shared workspace packages. The UI text and error messages are in Arabic — keep new user-facing strings Arabic to match.
 
-## Migration status (Next.js monorepo — in progress)
+## Migration status (Next.js monorepo)
 
-A phased migration to a scalable Next.js architecture is underway (see `C:\Users\luqma\.claude\plans\please-inspect-the-project-ticklish-quasar.md`). **Phase 1 is done:** an npm-workspace monorepo now exists alongside the legacy code:
-- `apps/web` — Next.js 15 App Router (TS, Tailwind RTL). Ports the three pages; runs on **:3000** and **proxies `/api/*` to the Express backend on :3001** (`apps/web/next.config.ts` `rewrites`). Dev: `npm run dev` at the repo root (set `BACKEND_ORIGIN` if the backend isn't on :3001). Still run the Express backend separately for the API.
+A phased migration to a scalable Next.js architecture is underway (see `C:\Users\luqma\.claude\plans\please-inspect-the-project-ticklish-quasar.md`). **Phases 1–2 are done:** the legacy Vite `frontend/` and Express `backend/` have been **removed**; everything now lives in an npm-workspace monorepo:
+- `apps/web` — Next.js 15 App Router (TS strict, Tailwind RTL). UI pages **and** the API (native route handlers in `app/api/**`) on one origin (**:3000**). No CORS, no proxy.
 - `apps/worker` — placeholder for the Phase 5 BullMQ video-poll worker.
-- `packages/openrouter` — typed port of the OpenRouter client (`packages/openrouter/src/index.ts`).
-- `packages/db` — Prisma schema mirroring the SQLite tables (`packages/db/prisma/schema.prisma`); runtime client lands in Phase 3.
+- `packages/openrouter` — typed OpenRouter client (`packages/openrouter/src/index.ts`).
+- `packages/db` — Prisma schema mirroring the SQLite tables (`packages/db/prisma/schema.prisma`); wired up in Phase 3.
 
-The legacy `frontend/` (Vite) and `backend/` (Express) are still the source of truth for the API and remain runnable per the commands below. Phase 2 ports the API into `apps/web` route handlers and removes Express. Until then, everything below still applies.
+**Not yet migrated (still on the Phase-1/2 stopgaps):** persistence is **`node:sqlite`** (Node's built-in SQLite, `apps/web/lib/db.ts`) — chosen over `better-sqlite3` to avoid a native toolchain and because **Node 22+ is required** for it; assets/uploads are on **local disk** (`apps/web/lib/storage.ts`); the video poller is still **fire-and-forget in-process** (`apps/web/lib/videoPoll.ts`). Phase 3 → Postgres/Prisma, Phase 4 → R2, Phase 5 → BullMQ.
 
 ## Commands
 
-Backend (port 3001):
+Everything runs from the repo root (npm workspaces):
 ```bash
-cd backend && npm install
-OPENROUTER_API_KEY=sk-or-v1-xxx JWT_SECRET=$(openssl rand -hex 32) npm start
+npm install
+JWT_SECRET=... OPENROUTER_API_KEY=sk-or-v1-... npm run dev   # Next dev on http://localhost:3000
+npm run build                                                # production build (.next/standalone)
+npm start                                                    # serve the production build
 ```
 
-Frontend (port 5173, proxies `/api` → `localhost:3001`):
+Full stack via Docker (single Next.js container serving UI + API on 3000):
 ```bash
-cd frontend && npm install
-npm run dev          # dev server
-npm run build        # production bundle → frontend/dist
+docker compose up --build -d   # http://localhost:3000
 ```
 
-Full stack via Docker (builds frontend, backend serves it as static + API on 3001):
-```bash
-docker compose up --build -d   # http://localhost:3001
-```
-
-There is **no test suite, linter, or typecheck** configured — `npm test` will fail. Both packages are plain JS (backend CommonJS, frontend ESM).
+There is **no test suite or configured linter** — `npm test` will fail. `npm run build` **does** run strict TypeScript type-checking (ESLint is skipped in builds via `next.config.ts`).
 
 ## Architecture
 
-**Request flow:** browser → `frontend/src/lib/api.js` (injects JWT from `localStorage['orms_token']`) → `/api/*` → Express routes → `backend/src/services/openrouter.js` → OpenRouter (`https://openrouter.ai/api/v1`).
+**Request flow:** browser → `apps/web/lib/api.ts` (injects JWT from `localStorage['orms_token']`) → same-origin `/api/*` **route handlers** (`apps/web/app/api/**/route.ts`) → `packages/openrouter` → OpenRouter (`https://openrouter.ai/api/v1`).
 
-**Backend layout** (`backend/src/`): `index.js` bootstraps Express, eagerly opens the DB (runs migrations), mounts routes, and — in production — serves the built frontend from the first existing dir among `$STATIC_DIR`, `../public` (Docker), `../../frontend/dist`. All non-`/api` paths fall back to `index.html` (SPA). `routes/` holds `auth`, `models`, `generate`, `assets`; `services/openrouter.js` is the single OpenRouter client; `db/database.js` is a `better-sqlite3` singleton; `middleware/auth.js` does JWT.
+**Route handlers** live under `apps/web/app/api/`: `auth/{register,login,me}`, `models` (+`/image`,`/video`), `generate/{image,video}`, `generate/generations` (+`/[id]`, `/[id]/poll`), `assets/[filename]`, `health`. Shared logic is in `apps/web/lib/`: `db.ts` (`node:sqlite` singleton + inline migrations), `auth.ts` (`sign` + `requireAuth(req)` — throws `AuthError`, no Express middleware), `http.ts` (`json()`, `parseRequest()` for multipart-or-JSON replacing multer, `handleError()`), `storage.ts` (disk paths), `videoPoll.ts` (background poll). All handlers set `runtime='nodejs'` + `dynamic='force-dynamic'`.
 
 **Generation is the core, and the three modes differ fundamentally:**
 - **Image, sync** (`POST /api/generate/image`) — calls OpenRouter, decodes `b64_json`, sniffs magic bytes (Gemini mislabels JPEG as PNG), writes to `ASSETS_DIR`, returns immediately.
 - **Image, streaming SSE** — same endpoint with `stream:true`; only some models set `supports_streaming` (GPT-Image, GPT-5, Gemini, etc.). Server proxies OpenRouter's SSE, forwards `partial`/`completed` events to the client, and persists the final image.
 - **Video, async** (`POST /api/generate/video`) — submits a job, responds with `job_id` right away, then a **fire-and-forget `pollAndDownloadVideo()`** polls every 10s (≤15 min) in-process and downloads the mp4 when done. The client can also force a check via `POST /api/generate/generations/:id/poll`. This background task is why the backend needs a long-running server (see below).
 
-Reference images: uploaded via multer to `UPLOADS_DIR`, then inlined as base64 data URLs — as `input_references` for image-to-image, or `frame_images` (`first_frame`) for image-to-video. No separate upload endpoint.
+Reference images: sent as multipart `image`, parsed by `parseRequest()`, written to `UPLOADS_DIR`, and inlined as base64 data URLs (`orouter.bufferToDataUrl`) — as `input_references` for image-to-image, or `frame_images` (`first_frame`) for image-to-video. No separate upload endpoint.
 
-**Persistence:** every generation is one `generations` row (schema + migrations inline in `db/database.js`), tracked through `status` (`pending`→`in_progress`→`completed`/`failed`). `asset_path` is a **comma-separated** list of filenames served by `GET /api/assets/:file`; routes split it into `asset_urls`. All rows are scoped by `user_id` — history and detail queries always filter on the JWT's user.
+**Persistence:** every generation is one `generations` row (schema + migrations inline in `apps/web/lib/db.ts`), tracked through `status` (`pending`→`in_progress`→`completed`/`failed`). `asset_path` is a **comma-separated** list of filenames served by `GET /api/assets/:file`; routes split it into `asset_urls`. All rows are scoped by `user_id` — history and detail queries always filter on the JWT's user.
 
-**Model lists** are fetched from OpenRouter and cached in-process for 1 hour (`openrouter.js`), keyed by image vs video.
+**Model lists** are fetched from OpenRouter and cached in-process for 1 hour (`packages/openrouter`), keyed by image vs video.
 
 ## Design system (read before any UI work)
 
@@ -69,10 +64,10 @@ Non-negotiable rules (see `DESIGN.md` for the rest):
 
 Run the Design QA checklist (§28) before considering UI work done.
 
-## Deployment split (important)
+## Deployment (self-hosted, not serverless)
 
-The backend **cannot run on Vercel** — it uses `better-sqlite3` (native addon + on-disk file), writes assets/uploads/DB under `data/` (needs a persistent volume), and runs the post-response background poll. Deploy the backend as a container (Render/Railway/Fly/VPS) with `/app/data` mounted, deploy the frontend static bundle to Vercel, and point `vercel.json`'s `/api` rewrite at the backend's public URL (currently a `REPLACE_WITH_YOUR_BACKEND_HOST` placeholder). See `DEPLOY.md`.
+Deploy as a **single long-running container** (`Dockerfile` builds the Next.js `standalone` output; `docker-compose.yml` runs it on :3000 with `./data:/app/data`). Target a container host (Render/Railway/Fly/VPS) with a persistent volume at `/app/data`. **Do not use Vercel serverless** while the app still relies on `node:sqlite`, local-disk assets, and the in-process video poll — those need a stateful long-running server (Phases 3–5 remove those constraints). The base image is **`node:24`** because `node:sqlite` needs Node 22+. See `DEPLOY.md`.
 
 ## Environment variables
 
-`OPENROUTER_API_KEY` (required — generation 500s without it), `JWT_SECRET` (defaults to an insecure dev value), `PORT` (3001), `DB_PATH`/`UPLOADS_DIR`/`ASSETS_DIR` (under `data/`), `CORS_ORIGIN` (comma-separated allowlist; unset = allow all, dev only), `APP_REFERER`/`APP_TITLE` (sent as OpenRouter `HTTP-Referer`/`X-Title`). Backend loads `.env` from the **repo root**, not `backend/`.
+`OPENROUTER_API_KEY` (required for generation/models), `JWT_SECRET` (defaults to an insecure dev value — set it in prod), `PORT` (3000), `HOSTNAME` (0.0.0.0 in Docker), `DATA_DIR` (root for the DB + uploads + assets; defaults to `<app cwd>/data`), or override individually with `DB_PATH`/`UPLOADS_DIR`/`ASSETS_DIR`, and `APP_REFERER`/`APP_TITLE` (sent as OpenRouter `HTTP-Referer`/`X-Title`). No `CORS_ORIGIN` — the API is same-origin now. Phase 3+ adds `DATABASE_URL` / `REDIS_URL`.
