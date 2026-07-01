@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "design-taste-frontend": {
+      "source": "leonxlnx/taste-skill",
+      "sourceType": "github",
+      "skillPath": "skills/taste-skill/SKILL.md",
+      "computedHash": "899b84384f74f540ea5284d9b2e9234e050998b42eacc805410b518d4226c0b3"
+    },
+    "heroui-react": {
+      "source": "heroui-inc/heroui",
+      "sourceType": "github",
+      "skillPath": "skills/heroui-react/SKILL.md",
+      "computedHash": "f4a764d21a39ccc5b2076a869cf083bbfdb983e81f9deda8d75fef42c939a993"
+    }
+  }
+}
