@@ -1,0 +1,21 @@
+{
+  "name": "@orms/db",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "//": "Phase 3 adds the runtime deps: `npm i -w @orms/db @prisma/client && npm i -D -w @orms/db prisma`, then `npm run -w @orms/db generate`. Kept out of Phase 1 so `npm install` needs no Prisma engine download."
+}

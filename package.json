@@ -1,0 +1,20 @@
+{
+  "name": "orms-media-studio",
+  "private": true,
+  "version": "2.0.0",
+  "description": "OpenRouter Media Studio — scalable Next.js monorepo (web + worker + shared packages)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/web run build",
+    "start": "npm --workspace apps/web run start",
+    "lint": "npm --workspace apps/web run lint",
+    "worker:dev": "npm --workspace apps/worker run dev"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

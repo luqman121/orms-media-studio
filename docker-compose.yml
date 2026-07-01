@@ -1,14 +1,16 @@
 services:
-  orms:
+  web:
     build: .
-    container_name: orms-app
+    container_name: orms-web
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "3000:3000"
     environment:
       - JWT_SECRET=change-me-to-a-long-random-string
       - OPENROUTER_API_KEY=your-openrouter-api-key-here
-      - APP_REFERER=http://localhost:3001
+      - APP_REFERER=http://localhost:3000
       - APP_TITLE=OpenRouter Media Studio
+      - DATA_DIR=/app/data
     volumes:
       - ./data:/app/data
+  # Phase 5 adds a `worker` service (BullMQ video-poll) + redis/postgres here.

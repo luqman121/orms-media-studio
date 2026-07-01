@@ -1,25 +1,34 @@
-# Multi-stage Dockerfile — frontend build, then run backend serving static + API
+# Next.js monorepo — build apps/web and run the standalone server.
+# NOTE: Node 22+ is required for the built-in `node:sqlite` module used by the API.
 
-# Stage 1: build frontend
-FROM node:20-slim AS builder-frontend
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
-COPY frontend/ ./
+# Stage 1: install deps + build
+FROM node:24-bookworm-slim AS builder
+WORKDIR /app
+
+# Install workspace deps from lockfile (manifests first for layer caching).
+COPY package.json package-lock.json ./
+COPY apps/web/package.json ./apps/web/
+COPY apps/worker/package.json ./apps/worker/
+COPY packages/openrouter/package.json ./packages/openrouter/
+COPY packages/db/package.json ./packages/db/
+RUN npm ci
+
+# Build the Next.js app (produces .next/standalone).
+COPY . .
 RUN npm run build
 
-# Stage 2: install backend + copy static
-FROM node:20-slim
+# Stage 2: minimal runtime
+FROM node:24-bookworm-slim AS runner
 WORKDIR /app
-COPY backend/package.json backend/package-lock.json* ./
-RUN npm install --production
-COPY backend/src ./src
-COPY --from=builder-frontend /app/frontend/dist ./public
-RUN mkdir -p /app/data/uploads /app/data/assets
 ENV NODE_ENV=production \
-    PORT=3001 \
-    DB_PATH=/app/data/app.db \
-    UPLOADS_DIR=/app/data/uploads \
-    ASSETS_DIR=/app/data/assets
-EXPOSE 3001
-CMD [ "node", "src/index.js" ]
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    DATA_DIR=/app/data
+
+# Standalone output (traced from the monorepo root) + static assets.
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+
+RUN mkdir -p /app/data
+EXPOSE 3000
+CMD ["node", "apps/web/server.js"]

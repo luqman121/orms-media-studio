@@ -1,0 +1,21 @@
+{
+  "name": "@orms/worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Background worker (placeholder). Phase 5 fills this with the BullMQ video-poll worker.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orms/db": "*",
+    "@orms/openrouter": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "@types/node": "^22.10.7"
+  }
+}

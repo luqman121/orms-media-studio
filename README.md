@@ -17,7 +17,9 @@
 ## المتطلبات
 
 - `OPENROUTER_API_KEY` — مفتاح API من https://openrouter.ai/keys
-- Docker ( لدخول سريع) أو Node 20+ (لتطوير محلي)
+- Docker (لتشغيل سريع) أو **Node 22+** لتطوير محلي (مطلوب لوحدة `node:sqlite` المدمجة)
+
+> التطبيق الآن **تطبيق Next.js 15 واحد** (`apps/web`) يقدّم الواجهة والـ API من نفس المصدر — لا CORS ولا proxy. الكود منظّم كـ npm workspaces (`apps/*`, `packages/*`).
 
 ## التشغيل عبر Docker (الأسهل)
 
@@ -30,26 +32,19 @@ export JWT_SECRET=$(openssl rand -hex 32)
 docker compose up --build -d
 
 # 3) افتح
-# http://localhost:3001
+# http://localhost:3000
 ```
 
 ## التطوير المحلي
 
-Backend (ポート 3001):
+كل شيء يعمل من جذر المستودع (npm workspaces، المنفذ 3000):
 ```bash
-cd backend
 npm install
-OPENROUTER_API_KEY=sk-or-v1-xxxx \
-JWT_SECRET=$(openssl rand -hex 32) \
-npm start
-```
+JWT_SECRET=$(openssl rand -hex 32) OPENROUTER_API_KEY=sk-or-v1-xxxx npm run dev
+# افتح http://localhost:3000
 
-Frontend (ポート 5173، يبروكسي /api إلى 3001):
-```bash
-cd frontend
-npm install
-npm run dev
-# افتح http://localhost:5173
+npm run build   # بناء إنتاجي (.next/standalone)
+npm start       # تشغيل البناء الإنتاجي
 ```
 
 ## المتغيرات البيئية
@@ -57,31 +52,28 @@ npm run dev
 | المتغير | الوصف | افتراضي |
 |---------|-------|---------|
 | `OPENROUTER_API_KEY` | مفتاح OpenRouter | مطلوب |
-| `JWT_SECRET` | سر JWT | dev-secret |
-| `PORT` | منفذ الخادم | 3001 |
-| `DB_PATH` | مسار SQLite | data/app.db |
-| `UPLOADS_DIR` | مسار الصور المرفوعة | data/uploads |
-| `ASSETS_DIR` | مسار النتائج | data/assets |
-| `APP_REFERER` | قيمة HTTP-Referer لـ OpenRouter | http://localhost:3001 |
+| `JWT_SECRET` | سر JWT | dev-secret (غيّره في الإنتاج) |
+| `PORT` | منفذ الخادم | 3000 |
+| `DATA_DIR` | جذر البيانات (DB + مرفوعات + نتائج) | `<cwd>/data` |
+| `DB_PATH` / `UPLOADS_DIR` / `ASSETS_DIR` | تجاوز مسارات فردية | داخل `DATA_DIR` |
+| `APP_REFERER` | قيمة HTTP-Referer لـ OpenRouter | http://localhost:3000 |
 | `APP_TITLE` | قيمة X-Title | OpenRouter Media Studio |
 
 ## المعمارية
 
 ```
- frontend (Vite+React+Tailwind+RTL)
-      │ fetch /api/*
+ apps/web — Next.js 15 (UI + API على نفس المصدر، RTL، Tailwind)
+      │  fetch /api/*  (lib/api.ts يحقن JWT)
+      ▼
+ app/api/**/route.ts  (route handlers، node:sqlite + JWT)
+      ├── /api/auth/{register,login,me}
+      ├── /api/models (+/image,/video)
+      ├── /api/generate/image — توليد متزامن أو SSE
+      ├── /api/generate/video — غير متزامن + poll خلفي
+      ├── /api/generate/generations (+/[id], /[id]/poll)
+      └── /api/assets/[filename]
       │
- backend (Express + SQLite + JWT)
-      │
-      ├── /api/auth           — register / login / me
-      ├── /api/models         — list cached image + video models
-      ├── /api/generate/image — POST /v1/images (sync or SSE stream)
-      ├── /api/generate/video — POST /v1/videos (async, auto-poll)
-      ├── /api/generations    — history list/detail/delete
-      ├── /api/generate/generations/:id/poll — video status poll
-      └── /api/assets/:file   — static generated asset
-      │
- OpenRouter API (https://openrouter.ai/api/v1)
+ packages/openrouter → OpenRouter API (https://openrouter.ai/api/v1)
 ```
 
 ## الترخيص
