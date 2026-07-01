@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" fill="none">
+  <rect width="192" height="192" rx="40" fill="#100C1B"/>
+  <!-- 4-point spark: outer violet, inner cyan -->
+  <path d="M96 32 L110 82 L160 96 L110 110 L96 160 L82 110 L32 96 L82 82 Z" fill="#864FF2"/>
+  <path d="M96 68 L103 91 L126 96 L103 101 L96 124 L89 101 L66 96 L89 91 Z" fill="#36C4F0"/>
+</svg>

@@ -8,6 +8,7 @@ import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
 import { putObject } from '@/lib/storage';
+import { checkImageRateLimit } from '@/lib/ratelimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,19 @@ export async function POST(req: Request) {
   let recordId: number | null = null;
   try {
     const userId = requireAuth(req);
+    const rl = await checkImageRateLimit(userId);
+    if (!rl.allowed) {
+      return Response.json(
+        { error: 'تجاوزت حد الطلبات — حاول مرة أخرى قريباً', remaining: rl.remaining },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.max(0, Math.ceil((rl.reset - Date.now()) / 1000))),
+            'X-RateLimit-Remaining': '0',
+          },
+        },
+      );
+    }
     const { fields, file } = await parseRequest(req);
     if (!fields.model || !fields.prompt) {
       return json({ error: 'النموذج والبرومبت مطلوبان' }, 400);

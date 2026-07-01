@@ -16,7 +16,8 @@
     "migrate": "npm --workspace @orms/db run migrate",
     "migrate:deploy": "npm --workspace @orms/db run migrate:deploy",
     "db:seed-from-sqlite": "tsx scripts/migrate-sqlite-to-pg.ts",
-    "worker:dev": "npm --workspace apps/worker run dev"
+    "worker:dev": "npm --workspace apps/worker run dev",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "engines": {
     "node": ">=22"

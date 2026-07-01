@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
 import fs from 'node:fs';
+import { withSentryConfig } from '@sentry/nextjs';
 
 // In a monorepo, Next.js runs from apps/web/ and only loads .env from that directory.
 // The shared .env lives two levels up at the repo root — load it here so DATABASE_URL
@@ -36,4 +37,16 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Wrap with Sentry when configured; skip transparently in local dev.
+const hasSentry = Boolean(process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN);
+export default hasSentry
+  ? withSentryConfig(nextConfig, {
+      telemetry: false,
+      silent: true,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      // Disable source map upload when SENTRY_AUTH_TOKEN is not available.
+      sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+    })
+  : nextConfig;

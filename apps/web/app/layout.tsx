@@ -2,16 +2,28 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { Providers } from './providers';
+import { SwRegister } from '@/components/SwRegister';
 
 export const metadata: Metadata = {
   title: 'OpenRouter Media Studio — استوديو الصور والفيديو',
   description: 'مولّد الصور والفيديو بالذكاء الاصطناعي عبر OpenRouter',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'استوديو الميديا',
+  },
+  icons: {
+    icon: '/icons/icon.svg',
+    apple: '/icons/apple-touch-icon.png',
+  },
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  themeColor: '#864FF2',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -26,6 +38,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body>
+        <SwRegister />
         <Providers>{children}</Providers>
       </body>
     </html>
