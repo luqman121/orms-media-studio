@@ -1,7 +1,8 @@
 // Ported from backend/src/routes/auth.js — GET /api/auth/me
-import { getDB } from '@/lib/db';
+import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { serializeUser } from '@/lib/serialize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,10 +10,12 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     const userId = requireAuth(req);
-    const db = getDB();
-    const user = db.prepare('SELECT id, email, name, created_at FROM users WHERE id=?').get(userId);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, createdAt: true },
+    });
     if (!user) return json({ error: 'المستخدم غير موجود' }, 404);
-    return json({ user });
+    return json({ user: serializeUser(user) });
   } catch (e) {
     return handleError(e);
   }

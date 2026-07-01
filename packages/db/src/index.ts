@@ -1,14 +1,15 @@
-// Phase 1 placeholder — kept import-free so the workspace installs without the
-// Prisma engine. The schema (prisma/schema.prisma) is the real deliverable here.
-//
-// Phase 3 replaces this file with the standard Prisma singleton:
-//
-//   import { PrismaClient } from '@prisma/client';
-//   const g = globalThis as unknown as { prisma?: PrismaClient };
-//   export const prisma = g.prisma ?? new PrismaClient();
-//   if (process.env.NODE_ENV !== 'production') g.prisma = prisma;
-//   export * from '@prisma/client';
+// Prisma client singleton — reused across Next.js hot-reloads / route handlers.
+// Requires `prisma generate` (run by the root `dev`/`build` scripts).
+import { PrismaClient } from '@prisma/client';
 
-export function prismaNotReady(): never {
-  throw new Error('@orms/db is not wired yet — Prisma lands in Phase 3 of the migration.');
-}
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
+export const prisma: PrismaClient =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+export * from '@prisma/client';

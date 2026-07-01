@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@orms/db": "*",
     "@orms/openrouter": "*",
+    "@prisma/client": "^6.3.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.468.0",

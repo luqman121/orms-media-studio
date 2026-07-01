@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as orouter from '@orms/openrouter';
-import { getDB } from '@/lib/db';
+import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
 import { UPLOADS_DIR, ensureStorageDirs } from '@/lib/storage';
@@ -21,7 +21,6 @@ export async function POST(req: Request) {
     const { fields, file } = await parseRequest(req);
     if (!fields.model || !fields.prompt) return json({ error: 'النموذج والبرومبت مطلوبان' }, 400);
 
-    const db = getDB();
     const params: Record<string, unknown> = { model: fields.model, prompt: fields.prompt };
     for (const k of ['duration', 'resolution', 'aspect_ratio', 'size']) {
       const v = fields[k];
@@ -49,23 +48,27 @@ export async function POST(req: Request) {
       }
     }
 
-    recordId = Number(
-      db
-        .prepare(
-          `INSERT INTO generations (user_id, type, model_id, model_name, prompt, params_json, status)
-           VALUES (?, 'video', ?, ?, ?, ?, 'pending')`,
-        )
-        .run(userId, fields.model, fields.model, fields.prompt, JSON.stringify(params)).lastInsertRowid,
-    );
+    const record = await prisma.generation.create({
+      data: {
+        userId,
+        type: 'video',
+        modelId: fields.model,
+        modelName: fields.model,
+        prompt: fields.prompt,
+        paramsJson: JSON.stringify(params),
+        status: 'pending',
+      },
+      select: { id: true },
+    });
+    recordId = record.id;
 
     const submit = await orouter.submitVideo(params);
     const jobId = submit.id;
     const pollingUrl = submit.polling_url ?? null;
-    db.prepare(`UPDATE generations SET status='pending', job_id=?, polling_url=?, updated_at=datetime('now') WHERE id=?`).run(
-      jobId,
-      pollingUrl,
-      recordId,
-    );
+    await prisma.generation.update({
+      where: { id: recordId },
+      data: { status: 'pending', jobId, pollingUrl },
+    });
 
     // Fire-and-forget background poll to auto-update.
     pollAndDownloadVideo(recordId, jobId, t0).catch((e) => {
@@ -81,13 +84,9 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     if (recordId != null) {
-      try {
-        getDB()
-          .prepare(`UPDATE generations SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`)
-          .run((e as Error).message, recordId);
-      } catch {
-        /* ignore */
-      }
+      await prisma.generation
+        .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
+        .catch(() => {});
       return json({ id: recordId, error: 'فشل إرسال طلب الفيديو', detail: (e as Error).message }, 502);
     }
     return handleError(e);

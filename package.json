@@ -8,13 +8,20 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm --workspace apps/web run dev",
-    "build": "npm --workspace apps/web run build",
+    "generate": "npm --workspace @orms/db run generate",
+    "dev": "npm run generate && npm --workspace apps/web run dev",
+    "build": "npm run generate && npm --workspace apps/web run build",
     "start": "npm --workspace apps/web run start",
     "lint": "npm --workspace apps/web run lint",
+    "migrate": "npm --workspace @orms/db run migrate",
+    "migrate:deploy": "npm --workspace @orms/db run migrate:deploy",
+    "db:seed-from-sqlite": "tsx scripts/migrate-sqlite-to-pg.ts",
     "worker:dev": "npm --workspace apps/worker run dev"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   }
 }
