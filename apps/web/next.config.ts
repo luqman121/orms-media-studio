@@ -1,9 +1,27 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
+import fs from 'node:fs';
 
-// Phase 3: persistence is PostgreSQL via Prisma (@orms/db). The API lives in
-// native route handlers (app/api/**). `@prisma/client` loads a native query engine
-// at runtime, so it must stay external (not webpack-bundled).
+// In a monorepo, Next.js runs from apps/web/ and only loads .env from that directory.
+// The shared .env lives two levels up at the repo root — load it here so DATABASE_URL
+// and other vars are available to route handlers (Prisma, R2, JWT, OpenRouter).
+// In Docker standalone mode cwd=/app, so the path resolves to /.env (doesn't exist) → skip.
+const rootEnvPath = path.join(process.cwd(), '..', '..', '.env');
+if (fs.existsSync(rootEnvPath)) {
+  for (const line of fs.readFileSync(rootEnvPath, 'utf8').split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 0) continue;
+    const key = t.slice(0, eq).trim();
+    let val = t.slice(eq + 1).trim();
+    // Strip surrounding quotes.
+    if (/^["'].*["']$/.test(val)) val = val.slice(1, -1);
+    // Don't override vars already set (e.g. from the real process environment or CI).
+    if (key && !(key in process.env)) process.env[key] = val;
+  }
+}
+
 const nextConfig: NextConfig = {
   // Self-hosted long-running server output (container deploy, not serverless).
   output: 'standalone',
