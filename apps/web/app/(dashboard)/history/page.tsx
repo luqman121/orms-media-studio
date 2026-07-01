@@ -1,9 +1,14 @@
 'use client';
-// Ported from frontend/src/pages/HistoryPage.jsx.
+// History / recent generations. UI restyled; data flow (list, filter, delete,
+// download) unchanged and uses the same endpoints.
 import { useState, useEffect, useCallback } from 'react';
-import { Trash2, Download, Loader2, Image as ImageIcon, Video as VideoIcon } from 'lucide-react';
+import Link from 'next/link';
+import { Trash2, Download, Loader2, Image as ImageIcon, Video as VideoIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { api } from '../../../lib/api';
-import Spinner from '../../../components/Spinner';
+import Card from '../../../components/ui/Card';
+import Badge from '../../../components/ui/Badge';
+import Tabs from '../../../components/ui/Tabs';
+import Skeleton from '../../../components/ui/Skeleton';
 
 interface HistoryItem {
   id: number;
@@ -55,61 +60,117 @@ export default function HistoryPage() {
     a.click();
   }
 
+  const statusLabel: Record<string, string> = {
+    completed: 'مكتمل',
+    pending: 'قيد الانتظار',
+    in_progress: 'قيد التوليد',
+    failed: 'فشل',
+  };
+
   return (
-    <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.2rem', flexWrap: 'wrap', gap: '0.8rem' }}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>السجل</h2>
-        <div style={{ display: 'flex', background: 'rgba(15,13,28,0.6)', padding: 4, borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-          {([['all', 'الكل'], ['image', 'صور'], ['video', 'فيديو']] as const).map(([v, l]) => (
-            <button key={v} onClick={() => setFilter(v)} style={{ padding: '0.5rem 0.9rem', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.82rem',
-              background: filter === v ? 'linear-gradient(120deg,#7c3aed,#8b5cf6)' : 'transparent', color: filter === v ? 'white' : 'var(--text-secondary)' }}>{l}</button>
-          ))}
+    <div className="mx-auto max-w-[1280px]">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-[1.7rem] font-extrabold text-text-100">السجل</h1>
+          <p className="mt-1 text-sm text-text-400">كل أعمالك المُولّدة في مكان واحد.</p>
         </div>
+        <Tabs
+          ariaLabel="تصفية"
+          value={filter}
+          onChange={setFilter}
+          className="!w-auto"
+          items={[
+            { value: 'all', label: 'الكل' },
+            { value: 'image', label: 'صور' },
+            { value: 'video', label: 'فيديو' },
+          ]}
+        />
       </div>
 
-      {error && <div style={{ color: '#fda4af', marginBottom: '1rem' }}>{error}</div>}
+      {error && (
+        <div className="mb-4 flex items-center gap-2 rounded-mdx border border-[rgba(255,92,122,0.3)] bg-[rgba(255,92,122,0.1)] px-3.5 py-3 text-sm text-[#fda4af]">
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
 
       {loading ? (
-        <Spinner label="" />
+        <div className="history-grid">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="aspect-[4/3]" />
+          ))}
+        </div>
       ) : items.length === 0 ? (
-        <div className="glass" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>لا توجد عمليات بعد — ابدأ بالتوليد من تبويب «توليد»</div>
+        <Card className="flex flex-col items-center gap-3 p-12 text-center">
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-[rgba(134,79,242,0.14)] text-primary-400">
+            <Sparkles size={26} />
+          </span>
+          <h3 className="text-lg font-bold text-text-100">لا توجد نتائج بعد</h3>
+          <p className="max-w-sm text-sm text-text-500">ابدأ بكتابة أول Prompt لك من المولّد وستظهر أعمالك هنا.</p>
+          <Link href="/generate" className="btn-primary mt-2 text-sm">
+            <Sparkles size={16} /> افتح المولّد
+          </Link>
+        </Card>
       ) : (
         <div className="history-grid">
           {items.map((it) => {
             const previewUrl = it.asset_urls?.[0];
             const isVideo = it.type === 'video';
+            const busy = it.status === 'pending' || it.status === 'in_progress';
             return (
-              <div key={it.id} className="glass" style={{ padding: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', background: '#0a070f', aspectRatio: '4/3' }}>
+              <Card key={it.id} hover className="flex flex-col gap-2.5 p-2.5">
+                <div className="relative aspect-[4/3] overflow-hidden rounded-mdx bg-bg-950">
                   {previewUrl ? (
                     isVideo ? (
-                      <video src={previewUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <video src={previewUrl} muted playsInline className="h-full w-full object-cover" />
                     ) : (
-                      <img src={previewUrl} alt={it.prompt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={previewUrl} alt={it.prompt} className="h-full w-full object-cover" />
                     )
                   ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.4rem', color: 'var(--text-secondary)' }}>
-                      {it.status === 'pending' || it.status === 'in_progress' ? <Loader2 size={24} className="spin-slow" /> : <ImageIcon size={24} />}
-                      <div style={{ fontSize: '0.78rem' }}>{it.status === 'completed' ? '—' : it.status}</div>
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-text-500">
+                      {busy ? <Loader2 size={24} className="spin-slow" /> : <ImageIcon size={24} />}
+                      <div className="text-xs">{statusLabel[it.status] || it.status}</div>
                     </div>
                   )}
-                  <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', color: 'white', borderRadius: 8, padding: '0.25rem 0.5rem', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
+                  <div className="absolute right-2 top-2">
+                    <Badge tone={isVideo ? 'cyan' : 'default'}>
+                      {isVideo ? <VideoIcon size={11} /> : <ImageIcon size={11} />}
+                    </Badge>
                   </div>
+                  {busy && (
+                    <div className="absolute left-2 top-2">
+                      <Badge tone="warning">{statusLabel[it.status]}</Badge>
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', direction: 'rtl', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {it.prompt || '—'}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', direction: 'ltr' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{new Date(it.created_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}</div>
-                  <div style={{ display: 'flex', gap: '0.3rem' }}>
+
+                <p dir="rtl" className="truncate px-1 text-sm text-text-400">{it.prompt || '—'}</p>
+
+                <div className="flex items-center justify-between px-1" dir="ltr">
+                  <span className="text-[0.7rem] text-text-500">
+                    {new Date(it.created_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}
+                  </span>
+                  <div className="flex gap-1.5">
                     {previewUrl && it.status === 'completed' && (
-                      <button onClick={() => downloadAsset(previewUrl, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)} title="تنزيل" style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: 9, padding: '0.35rem', color: 'var(--text-primary)', cursor: 'pointer' }}><Download size={14} /></button>
+                      <button
+                        onClick={() => downloadAsset(previewUrl, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)}
+                        title="تنزيل"
+                        aria-label="تنزيل"
+                        className="rounded-mdx border border-[rgba(134,79,242,0.3)] bg-[rgba(134,79,242,0.15)] p-1.5 text-text-100 transition-colors hover:bg-[rgba(134,79,242,0.25)]"
+                      >
+                        <Download size={14} />
+                      </button>
                     )}
-                    <button onClick={() => onDelete(it.id)} title="حذف" style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 9, padding: '0.35rem', color: '#fda4af', cursor: 'pointer' }}><Trash2 size={14} /></button>
+                    <button
+                      onClick={() => onDelete(it.id)}
+                      title="حذف"
+                      aria-label="حذف"
+                      className="rounded-mdx border border-[rgba(255,92,122,0.25)] bg-[rgba(255,92,122,0.1)] p-1.5 text-[#fda4af] transition-colors hover:bg-[rgba(255,92,122,0.2)]"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
-              </div>
+              </Card>
             );
           })}
         </div>
