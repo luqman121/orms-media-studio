@@ -1,0 +1,76 @@
+// Prisma schema — mirrors the original SQLite schema in backend/src/db/database.js.
+// Target: PostgreSQL (Neon). Field names are camelCase in Prisma and mapped to the
+// existing snake_case columns/tables so historical data migrates cleanly (Phase 3).
+//
+// NOTE: `model_cache` is mirrored here for a faithful 1:1 port, but Phase 3 drops it
+// in favor of a Redis key with a 1h TTL. Do not build new features on it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  generations    Generation[]
+  uploadedImages UploadedImage[]
+
+  @@map("users")
+}
+
+model Generation {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  type           String // 'image' | 'video'
+  modelId        String    @map("model_id")
+  modelName      String?   @map("model_name")
+  prompt         String?
+  paramsJson     String?   @map("params_json")
+  status         String // 'pending' | 'in_progress' | 'completed' | 'failed' | 'streaming'
+  jobId          String?   @map("job_id")
+  pollingUrl     String?   @map("polling_url")
+  assetPath      String?   @map("asset_path") // comma-separated filenames / storage keys
+  assetMediaType String?   @map("asset_media_type")
+  thumbnailPath  String?   @map("thumbnail_path")
+  cost           String? // numeric string USD
+  error          String?
+  durationMs     Int?      @map("duration_ms")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)], name: "idx_generations_user")
+  @@map("generations")
+}
+
+model UploadedImage {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  filename     String
+  originalName String?  @map("original_name")
+  mimeType     String?  @map("mime_type")
+  size         Int?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("uploaded_images")
+}
+
+model ModelCache {
+  key       String   @id
+  payload   String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("model_cache")
+}

@@ -11,6 +11,22 @@ npm-debug.log*
 frontend/dist/
 backend/public/
 
+# Next.js
+apps/web/.next/
+apps/web/out/
+next-env.d.ts
+
+# TypeScript / package build output
+**/dist/
+**/*.tsbuildinfo
+
+# Prisma generated client
+packages/db/generated/
+packages/db/src/generated/
+
+# Turbo / tooling caches
+.turbo/
+
 # Data (SQLite + uploads + generated assets)
 data/
 
