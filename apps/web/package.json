@@ -13,6 +13,7 @@
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@orms/db": "*",
     "@orms/openrouter": "*",
+    "bullmq": "^5.0.0",
     "@prisma/client": "^6.3.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",

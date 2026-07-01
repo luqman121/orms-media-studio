@@ -1,0 +1,25 @@
+# BullMQ video-poll worker + Bull Board admin UI (port 4001).
+# Separate from the main Next.js Dockerfile — worker has no Next.js build step.
+FROM node:24-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Install all workspace deps (npm ci needs every workspace package.json).
+COPY package.json package-lock.json ./
+COPY apps/web/package.json ./apps/web/
+COPY apps/worker/package.json ./apps/worker/
+COPY packages/openrouter/package.json ./packages/openrouter/
+COPY packages/db/package.json ./packages/db/
+RUN npm ci
+
+# Generate Prisma client (query engine) before copying source.
+COPY tsconfig.base.json ./
+COPY packages/db/prisma ./packages/db/prisma
+RUN npm run generate
+
+# Copy shared packages + worker source.
+COPY packages ./packages
+COPY apps/worker ./apps/worker
+
+EXPOSE 4001
+CMD ["node_modules/.bin/tsx", "apps/worker/src/index.ts"]
