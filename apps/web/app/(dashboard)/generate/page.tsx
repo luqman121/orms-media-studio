@@ -14,6 +14,8 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
+  Wand2,
+  Undo2,
 } from 'lucide-react';
 import { api, getToken, type ApiError } from '../../../lib/api';
 import Card from '../../../components/ui/Card';
@@ -74,6 +76,11 @@ export default function GeneratePage() {
   const [pollingText, setPollingText] = useState('');
   const [error, setError] = useState('');
 
+  const [enhancing, setEnhancing] = useState(false);
+  const [autoEnhance, setAutoEnhance] = useState(false);
+  const [previousPrompt, setPreviousPrompt] = useState<string | null>(null);
+  const busy = running || enhancing;
+
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const filePRef = useRef<HTMLInputElement | null>(null);
 
@@ -113,6 +120,7 @@ export default function GeneratePage() {
     setResult(null);
     setError('');
     setPollingText('');
+    setPreviousPrompt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, models]);
 
@@ -132,16 +140,64 @@ export default function GeneratePage() {
 
   const supportsStream = mode === 'image' && !!currentModel?.supports_streaming;
 
+  // Calls the prompt-enhancer API; throws with a user-facing message on failure.
+  async function callEnhanceApi(text: string, type: 'image' | 'video'): Promise<string> {
+    try {
+      const r = await api.post<{ enhancedPrompt: string }>('/api/enhance-prompt', { prompt: text, type });
+      return r.enhancedPrompt;
+    } catch (e) {
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل تحسين البرومبت';
+      throw new Error(detail && detail !== base ? `${base} — ${detail}` : base);
+    }
+  }
+
+  async function handleEnhanceClick() {
+    if (!prompt.trim()) return setError('اكتب برومبتاً أولاً ليتم تحسينه');
+    setEnhancing(true);
+    setError('');
+    try {
+      const enhanced = await callEnhanceApi(prompt, mode);
+      setPreviousPrompt(prompt);
+      setPrompt(enhanced);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function handleUndoEnhance() {
+    if (previousPrompt === null) return;
+    setPrompt(previousPrompt);
+    setPreviousPrompt(null);
+  }
+
   async function runImage() {
     if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
-    setRunning(true);
     setError('');
+    let finalPrompt = prompt;
+    if (autoEnhance) {
+      setEnhancing(true);
+      try {
+        finalPrompt = await callEnhanceApi(prompt, 'image');
+        setPreviousPrompt(prompt);
+        setPrompt(finalPrompt);
+      } catch (e) {
+        setEnhancing(false);
+        setError((e as Error).message);
+        return;
+      }
+      setEnhancing(false);
+    }
+    setRunning(true);
     setResult(null);
     setPartialProgress(0);
     const fd = new FormData();
     if (referenceImage) fd.append('image', referenceImage);
     fd.append('model', selectedModelId);
-    fd.append('prompt', prompt);
+    fd.append('prompt', finalPrompt);
     if (n) fd.append('n', String(n));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
@@ -205,15 +261,29 @@ export default function GeneratePage() {
 
   async function runVideo() {
     if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
-    setRunning(true);
     setError('');
+    let finalPrompt = prompt;
+    if (autoEnhance) {
+      setEnhancing(true);
+      try {
+        finalPrompt = await callEnhanceApi(prompt, 'video');
+        setPreviousPrompt(prompt);
+        setPrompt(finalPrompt);
+      } catch (e) {
+        setEnhancing(false);
+        setError((e as Error).message);
+        return;
+      }
+      setEnhancing(false);
+    }
+    setRunning(true);
     setResult(null);
     setPollingText('إرسال الطلب...');
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     const fd = new FormData();
     if (referenceImage) fd.append('image', referenceImage);
     fd.append('model', selectedModelId);
-    fd.append('prompt', prompt);
+    fd.append('prompt', finalPrompt);
     if (duration) fd.append('duration', String(duration));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
@@ -272,6 +342,7 @@ export default function GeneratePage() {
   );
 
   function submit() {
+    if (busy) return;
     if (mode === 'image') runImage();
     else runVideo();
   }
@@ -299,7 +370,7 @@ export default function GeneratePage() {
           className="mb-5"
           value={mode}
           onChange={setMode}
-          disabled={running}
+          disabled={busy}
           items={[
             { value: 'image', label: 'توليد صورة', icon: <ImageIcon size={16} /> },
             { value: 'video', label: 'توليد فيديو', icon: <VideoIcon size={16} /> },
@@ -316,7 +387,7 @@ export default function GeneratePage() {
                 <AlertCircle size={15} /> {modelsError}
               </div>
             ) : (
-              <Select id="model-select" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={running}>
+              <Select id="model-select" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={busy}>
                 {curModels.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}
@@ -328,23 +399,62 @@ export default function GeneratePage() {
         </div>
 
         {/* Prompt */}
-        <div className="mb-4">
-          <label className="lbl" htmlFor="prompt">البرومبت</label>
+        <div className="mb-3">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label className="lbl !mb-0" htmlFor="prompt">البرومبت</label>
+            <div className="flex items-center gap-2">
+              {previousPrompt !== null && (
+                <button
+                  type="button"
+                  onClick={handleUndoEnhance}
+                  disabled={busy}
+                  className="flex items-center gap-1 text-xs text-text-500 transition-colors hover:text-text-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Undo2 size={12} /> تراجع
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleEnhanceClick}
+                disabled={busy || !prompt.trim()}
+                className="flex items-center gap-1.5 rounded-mdx border border-[rgba(134,79,242,0.35)] bg-[rgba(134,79,242,0.08)] px-2.5 py-1.5 text-xs font-bold text-[#c9b8fb] transition-colors hover:bg-[rgba(134,79,242,0.16)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {enhancing ? (
+                  <span className="h-3 w-3 animate-spin-slow rounded-full border-2 border-[#c9b8fb]/30 border-t-[#c9b8fb]" />
+                ) : (
+                  <Wand2 size={13} />
+                )}
+                تحسين البرومبت بالذكاء الاصطناعي
+              </button>
+            </div>
+          </div>
           <textarea
             id="prompt"
             className="prompt-box !min-h-[120px]"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={running}
+            disabled={busy}
             placeholder={mode === 'image' ? 'اكتب وصف الصورة التي تريد إنشاءها...' : 'اكتب مشهد الفيديو، الحركة، الإضاءة، والأسلوب...'}
           />
+          <p className="mt-1.5 text-xs text-text-500">
+            اكتب فكرة بسيطة، وسيقوم الذكاء الاصطناعي بتحويلها إلى برومبت احترافي للتوليد.
+          </p>
         </div>
+
+        {/* Auto-enhance toggle */}
+        <label className="mb-4 flex cursor-pointer items-center gap-2.5 rounded-mdx border border-[rgba(134,79,242,0.2)] bg-[rgba(134,79,242,0.06)] px-3.5 py-2.5">
+          <input type="checkbox" checked={autoEnhance} onChange={(e) => setAutoEnhance(e.target.checked)} disabled={busy} className="accent-primary-500" />
+          <span className="text-sm text-text-200">
+            <Wand2 size={14} className="ml-1.5 inline text-primary-500" />
+            دع الذكاء الاصطناعي يحسّن برومبتي قبل التوليد
+          </span>
+        </label>
 
         {/* Params */}
         <div className="param-grid mb-4">
           {mode === 'image' && supportedKeys.includes('n') && (
             <Field label="عدد الصور">
-              <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={running}>
+              <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={busy}>
                 {[1, 2, 3, 4].map((x) => (
                   <option key={x} value={x}>{x}</option>
                 ))}
@@ -353,12 +463,12 @@ export default function GeneratePage() {
           )}
           {mode === 'video' && (
             <Field label="المدة (ثانية)">
-              <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={running} placeholder="تلقائي" />
+              <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} placeholder="تلقائي" />
             </Field>
           )}
           {(mode === 'image' && supportedKeys.includes('resolution')) || mode === 'video' ? (
             <Field label="الدقة">
-              <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={running}>
+              <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={busy}>
                 <option value="">تلقائي</option>
                 {(mode === 'video' ? videoResolutionLabels : imageResolutions).map((r) => (
                   <option key={r} value={r}>{r}</option>
@@ -367,7 +477,7 @@ export default function GeneratePage() {
             </Field>
           ) : null}
           <Field label="نسبة الأبعاد">
-            <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={running}>
+            <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={busy}>
               <option value="">تلقائي</option>
               {ratioOptions.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -376,7 +486,7 @@ export default function GeneratePage() {
           </Field>
           {mode === 'image' && supportedKeys.includes('quality') && (
             <Field label="الجودة">
-              <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={running}>
+              <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={busy}>
                 <option value="">تلقائي</option>
                 {['low', 'medium', 'high', 'auto'].map((q) => (
                   <option key={q} value={q}>{q}</option>
@@ -386,7 +496,7 @@ export default function GeneratePage() {
           )}
           {mode === 'image' && supportedKeys.includes('output_format') && (
             <Field label="الصيغة">
-              <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={running}>
+              <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={busy}>
                 <option value="">تلقائي (PNG)</option>
                 <option value="png">PNG</option>
                 <option value="jpeg">JPEG</option>
@@ -404,7 +514,7 @@ export default function GeneratePage() {
               <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} className="hidden" />
               <button
                 onClick={() => filePRef.current?.click()}
-                disabled={running}
+                disabled={busy}
                 className="flex w-full items-center justify-center gap-2 rounded-mdx border border-dashed border-[rgba(134,79,242,0.4)] bg-[rgba(134,79,242,0.06)] px-4 py-4 text-sm text-text-400 transition-colors hover:bg-[rgba(134,79,242,0.1)] disabled:opacity-50"
               >
                 <Upload size={18} /> ارفع صورة مرجعية
@@ -415,7 +525,7 @@ export default function GeneratePage() {
               <img src={refPreview} alt="مرجع" className="block max-h-52 w-full object-cover" />
               <button
                 onClick={clearRef}
-                disabled={running}
+                disabled={busy}
                 className="absolute left-2 top-2 flex items-center gap-1.5 rounded-mdx bg-black/70 px-2.5 py-1.5 text-xs text-white"
               >
                 <X size={14} /> حذف
@@ -427,7 +537,7 @@ export default function GeneratePage() {
         {/* Streaming toggle */}
         {mode === 'image' && supportsStream && (
           <label className="mb-5 flex cursor-pointer items-center gap-2.5 rounded-mdx border border-[rgba(54,196,240,0.2)] bg-[rgba(54,196,240,0.06)] px-3.5 py-2.5">
-            <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={running} className="accent-[#36C4F0]" />
+            <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={busy} className="accent-[#36C4F0]" />
             <span className="text-sm text-text-200">
               <Sparkles size={14} className="ml-1.5 inline text-cyan-500" />
               السحب المباشر (Streaming) — يعرض الصورة تدريجيًا أثناء التوليد
@@ -435,8 +545,8 @@ export default function GeneratePage() {
           </label>
         )}
 
-        <Button fullWidth size="lg" onClick={submit} loading={running} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
-          {running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
+        <Button fullWidth size="lg" onClick={submit} loading={busy} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
+          {enhancing ? 'جاري تحسين البرومبت...' : running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
           <span className="shine" />
         </Button>
 

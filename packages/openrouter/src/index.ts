@@ -163,6 +163,68 @@ export async function downloadVideoContent(jobId: string, index = 0): Promise<Bu
   return Buffer.from(await r.arrayBuffer());
 }
 
+// ---- Prompt enhancer (chat/completions) ----
+function enhancerModel(): string {
+  return process.env.PROMPT_ENHANCER_MODEL || 'openai/gpt-4o-mini';
+}
+
+const ENHANCE_SYSTEM_PROMPT: Record<'image' | 'video', string> = {
+  image: [
+    'You are a prompt engineer for an AI image generator. Rewrite the user\'s idea into a single, professional',
+    'generation prompt of 50-90 words. Add concrete detail on: subject, scene, lighting, visual style, camera',
+    'angle/composition, and mood, with a commercial/advertising feel when it fits the subject. Preserve the',
+    'user\'s original intent and subject — do not change what the idea is about. If the prompt is already',
+    'detailed, only lightly polish it instead of rewriting it. Never introduce brand names, celebrities,',
+    'copyrighted characters, or real people unless the user already named them. Never add unsafe, sexual,',
+    'violent, or illegal content. Respond with ONLY the final prompt text — no preamble, no quotes, no labels.',
+  ].join(' '),
+  video: [
+    'You are a prompt engineer for an AI video generator. Rewrite the user\'s idea into a single, professional',
+    'generation prompt of 70-120 words. Add concrete detail on: subject, scene, motion, camera movement,',
+    'duration-friendly action, lighting, mood, and cinematic style with realistic visual detail. Preserve the',
+    'user\'s original intent and subject — do not change what the idea is about. If the prompt is already',
+    'detailed, only lightly polish it instead of rewriting it. Never introduce brand names, celebrities,',
+    'copyrighted characters, or real people unless the user already named them. Never add unsafe, sexual,',
+    'violent, or illegal content. Respond with ONLY the final prompt text — no preamble, no quotes, no labels.',
+  ].join(' '),
+};
+
+// Strip a wrapping pair of quote characters some models add despite instructions.
+function stripWrappingQuotes(s: string): string {
+  const t = s.trim();
+  if (t.length >= 2) {
+    const first = t[0];
+    const last = t[t.length - 1];
+    if ((first === '"' && last === '"') || (first === '“' && last === '”')) {
+      return t.slice(1, -1).trim();
+    }
+  }
+  return t;
+}
+
+// Enhances a short/weak prompt into a detailed generation prompt via an OpenRouter chat model.
+export async function enhancePrompt(prompt: string, type: 'image' | 'video'): Promise<string> {
+  const r = await fetch(`${BASE}/chat/completions`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      model: enhancerModel(),
+      messages: [
+        { role: 'system', content: ENHANCE_SYSTEM_PROMPT[type] },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 300,
+    }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Prompt enhance ${r.status}: ${text}`);
+  const j = JSON.parse(text) as { choices?: { message?: { content?: string } }[] };
+  const content = j.choices?.[0]?.message?.content;
+  if (!content || !content.trim()) throw new Error('Prompt enhance: empty response');
+  return stripWrappingQuotes(content);
+}
+
 // Convert a local file to a base64 data URL (for input_references / frame_images).
 // NOTE: In Phase 4 this will read from object storage (R2) instead of disk.
 export function fileToDataUrl(filePath: string, mimeType: string): string {
