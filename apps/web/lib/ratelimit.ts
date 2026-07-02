@@ -16,6 +16,7 @@ function getRedis(): Redis | null {
 
 let imageRL: Ratelimit | null = null;
 let videoRL: Ratelimit | null = null;
+let enhanceRL: Ratelimit | null = null;
 
 function imageRateLimit(): Ratelimit | null {
   if (imageRL) return imageRL;
@@ -33,6 +34,14 @@ function videoRateLimit(): Ratelimit | null {
   return videoRL;
 }
 
+function enhanceRateLimit(): Ratelimit | null {
+  if (enhanceRL) return enhanceRL;
+  const r = getRedis();
+  if (!r) return null;
+  enhanceRL = new Ratelimit({ redis: r, limiter: Ratelimit.slidingWindow(20, '1 m'), prefix: 'rl:enh' });
+  return enhanceRL;
+}
+
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
@@ -48,6 +57,13 @@ export async function checkImageRateLimit(userId: number): Promise<RateLimitResu
 
 export async function checkVideoRateLimit(userId: number): Promise<RateLimitResult> {
   const rl = videoRateLimit();
+  if (!rl) return { allowed: true, remaining: 999, reset: 0 };
+  const { success, remaining, reset } = await rl.limit(String(userId));
+  return { allowed: success, remaining, reset };
+}
+
+export async function checkEnhanceRateLimit(userId: number): Promise<RateLimitResult> {
+  const rl = enhanceRateLimit();
   if (!rl) return { allowed: true, remaining: 999, reset: 0 };
   const { success, remaining, reset } = await rl.limit(String(userId));
   return { allowed: success, remaining, reset };

@@ -1,7 +1,8 @@
 'use client';
-// Generator studio. UI rebuilt on the ORMS design system; all generation logic
-// (model loading, image sync/streaming, async video poll, params) is unchanged
-// and calls the exact same API contracts as before.
+// Generator studio — premium create screen (ref screens 2–3): large preview
+// panel + side settings panel with Properties/Info tabs and a success state.
+// ALL generation logic (model loading, image sync/streaming, async video poll,
+// prompt enhancer, params) is unchanged and calls the exact same API contracts.
 import { useState, useRef, useEffect, useCallback, type ChangeEvent } from 'react';
 import {
   Image as ImageIcon,
@@ -14,9 +15,14 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
+  Wand2,
+  Undo2,
+  Copy,
+  Check,
+  Info,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { api, getToken } from '../../../lib/api';
-import Card from '../../../components/ui/Card';
+import { api, getToken, type ApiError } from '../../../lib/api';
 import Button from '../../../components/ui/Button';
 import Tabs from '../../../components/ui/Tabs';
 import { Field, Select } from '../../../components/ui/Field';
@@ -38,7 +44,28 @@ interface ResultState {
   assets: string[];
   cost?: string | number;
   id?: number;
+  at?: number;
 }
+
+// Style/colour presets (ref screen 3 chips). Selected presets are appended to
+// the prompt text at submit time only — the generation pipeline is untouched.
+const STYLE_PRESETS = [
+  { label: 'سينمائي', kw: 'cinematic style, dramatic lighting' },
+  { label: 'واقعي', kw: 'photorealistic, ultra detailed' },
+  { label: 'تجريدي', kw: 'abstract art style' },
+  { label: 'خيال علمي', kw: 'sci-fi futuristic style' },
+  { label: 'طبيعة', kw: 'lush nature scenery' },
+  { label: 'إعلان منتج', kw: 'premium commercial product shot' },
+];
+const COLOR_PRESETS = [
+  { label: 'أزرق', hex: '#2f6df6', kw: 'blue tones' },
+  { label: 'أحمر', hex: '#ff5b6e', kw: 'red tones' },
+  { label: 'برتقالي', hex: '#ff9a3d', kw: 'orange tones' },
+  { label: 'وردي', hex: '#ff9ad5', kw: 'pink tones' },
+  { label: 'أصفر', hex: '#ffd166', kw: 'golden yellow tones' },
+  { label: 'سماوي', hex: '#28d7ff', kw: 'cyan teal tones' },
+  { label: 'أحادي', hex: '#cbd5e1', kw: 'black and white monochrome' },
+];
 
 function downloadAsset(url: string, name: string) {
   const a = document.createElement('a');
@@ -73,6 +100,16 @@ export default function GeneratePage() {
   const [partialProgress, setPartialProgress] = useState(0);
   const [pollingText, setPollingText] = useState('');
   const [error, setError] = useState('');
+
+  const [enhancing, setEnhancing] = useState(false);
+  const [autoEnhance, setAutoEnhance] = useState(false);
+  const [previousPrompt, setPreviousPrompt] = useState<string | null>(null);
+  const busy = running || enhancing;
+
+  const [styles, setStyles] = useState<string[]>([]);
+  const [colors, setColors] = useState<string[]>([]);
+  const [panelTab, setPanelTab] = useState<'props' | 'info'>('props');
+  const [copied, setCopied] = useState(false);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const filePRef = useRef<HTMLInputElement | null>(null);
@@ -113,6 +150,7 @@ export default function GeneratePage() {
     setResult(null);
     setError('');
     setPollingText('');
+    setPreviousPrompt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, models]);
 
@@ -132,16 +170,86 @@ export default function GeneratePage() {
 
   const supportsStream = mode === 'image' && !!currentModel?.supports_streaming;
 
+  function toggleIn(list: string[], kw: string): string[] {
+    return list.includes(kw) ? list.filter((k) => k !== kw) : [...list, kw];
+  }
+
+  // Final prompt = user prompt + selected style/colour keywords (text-only append).
+  function composePrompt(): string {
+    const parts = [prompt.trim()];
+    if (styles.length) parts.push(styles.join(', '));
+    if (colors.length) parts.push(`dominant colors: ${colors.join(', ')}`);
+    return parts.filter(Boolean).join(', ');
+  }
+
+  // Calls the prompt-enhancer API; throws with a user-facing message on failure.
+  async function callEnhanceApi(text: string, type: 'image' | 'video'): Promise<string> {
+    try {
+      const r = await api.post<{ enhancedPrompt: string }>('/api/enhance-prompt', { prompt: text, type });
+      return r.enhancedPrompt;
+    } catch (e) {
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل تحسين البرومبت';
+      throw new Error(detail && detail !== base ? `${base} — ${detail}` : base);
+    }
+  }
+
+  async function handleEnhanceClick() {
+    if (!prompt.trim()) return setError('اكتب برومبتاً أولاً ليتم تحسينه');
+    setEnhancing(true);
+    setError('');
+    try {
+      const enhanced = await callEnhanceApi(prompt, mode);
+      setPreviousPrompt(prompt);
+      setPrompt(enhanced);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function handleUndoEnhance() {
+    if (previousPrompt === null) return;
+    setPrompt(previousPrompt);
+    setPreviousPrompt(null);
+  }
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
   async function runImage() {
     if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
-    setRunning(true);
     setError('');
+    let finalPrompt = composePrompt();
+    if (autoEnhance) {
+      setEnhancing(true);
+      try {
+        finalPrompt = await callEnhanceApi(finalPrompt, 'image');
+        setPreviousPrompt(prompt);
+        setPrompt(finalPrompt);
+      } catch (e) {
+        setEnhancing(false);
+        setError((e as Error).message);
+        return;
+      }
+      setEnhancing(false);
+    }
+    setRunning(true);
     setResult(null);
     setPartialProgress(0);
     const fd = new FormData();
     if (referenceImage) fd.append('image', referenceImage);
     fd.append('model', selectedModelId);
-    fd.append('prompt', prompt);
+    fd.append('prompt', finalPrompt);
     if (n) fd.append('n', String(n));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
@@ -178,7 +286,7 @@ export default function GeneratePage() {
                 setPartialProgress((p) => p + 1);
               } else if (evt.type === 'completed') {
                 collected.push(`/api/assets/${evt.filename}`);
-                setResult({ status: 'completed', assets: [...collected], cost: evt.cost, id: evt.id });
+                setResult({ status: 'completed', assets: [...collected], cost: evt.cost, id: evt.id, at: Date.now() });
               } else if (evt.type === 'error') {
                 throw new Error(evt.error?.message || 'خطأ في السحب المباشر');
               }
@@ -190,10 +298,13 @@ export default function GeneratePage() {
       } else {
         const r = await api.post<{ assets?: { filename: string }[]; cost?: string; id?: number }>('/api/generate/image', fd);
         const assets = (r.assets || []).map((a) => `/api/assets/${a.filename}`);
-        setResult({ status: 'completed', assets, cost: r.cost, id: r.id });
+        setResult({ status: 'completed', assets, cost: r.cost, id: r.id, at: Date.now() });
       }
     } catch (e) {
-      setError((e as Error).message || 'فشل توليد الصورة');
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل توليد الصورة';
+      setError(detail && detail !== base ? `${base} — ${detail}` : base);
     } finally {
       setRunning(false);
       setPartialProgress(0);
@@ -202,15 +313,29 @@ export default function GeneratePage() {
 
   async function runVideo() {
     if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
-    setRunning(true);
     setError('');
+    let finalPrompt = composePrompt();
+    if (autoEnhance) {
+      setEnhancing(true);
+      try {
+        finalPrompt = await callEnhanceApi(finalPrompt, 'video');
+        setPreviousPrompt(prompt);
+        setPrompt(finalPrompt);
+      } catch (e) {
+        setEnhancing(false);
+        setError((e as Error).message);
+        return;
+      }
+      setEnhancing(false);
+    }
+    setRunning(true);
     setResult(null);
     setPollingText('إرسال الطلب...');
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     const fd = new FormData();
     if (referenceImage) fd.append('image', referenceImage);
     fd.append('model', selectedModelId);
-    fd.append('prompt', prompt);
+    fd.append('prompt', finalPrompt);
     if (duration) fd.append('duration', String(duration));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
@@ -227,13 +352,21 @@ export default function GeneratePage() {
             pollTimerRef.current = null;
             const detail = await api.get<{ asset_urls?: string[]; cost?: string }>(`/api/generate/generations/${genId}`);
             const assets = detail.asset_urls || [];
-            setResult({ status: 'completed', assets, cost: detail.cost, id: genId });
+            setResult({ status: 'completed', assets, cost: detail.cost, id: genId, at: Date.now() });
             setPollingText('');
             setRunning(false);
           } else if (p.status === 'failed') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
-            setError('فشل توليد الفيديو');
+            // Surface the stored failure reason (provider error, R2 upload, timeout…).
+            let reason = '';
+            try {
+              const detail = await api.get<{ error?: string }>(`/api/generate/generations/${genId}`);
+              reason = detail.error || '';
+            } catch {
+              /* fall back to generic message */
+            }
+            setError(reason ? `فشل توليد الفيديو — ${reason}` : 'فشل توليد الفيديو');
             setPollingText('');
             setRunning(false);
           } else {
@@ -244,7 +377,10 @@ export default function GeneratePage() {
         }
       }, 8000);
     } catch (e) {
-      setError((e as Error).message || 'فشل إرسال طلب الفيديو');
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل إرسال طلب الفيديو';
+      setError(detail && detail !== base ? `${base} — ${detail}` : base);
       setRunning(false);
       setPollingText('');
     }
@@ -258,6 +394,7 @@ export default function GeneratePage() {
   );
 
   function submit() {
+    if (busy) return;
     if (mode === 'image') runImage();
     else runVideo();
   }
@@ -271,224 +408,456 @@ export default function GeneratePage() {
   const videoResolutionLabels = videoResolutions.length ? videoResolutions : ['720p', '1080p', '480p', '4K'];
   const ratioOptions = mode === 'video' ? (videoRatios.length ? videoRatios : commonRatios) : commonRatios;
 
-  return (
-    <div className="gen-layout">
-      {/* SETTINGS (right in RTL) */}
-      <Card className="glass-mobile-sm">
-        <div className="mb-5">
-          <h2 className="font-display text-xl font-extrabold text-text-100">إنشاء جديد</h2>
-          <p className="mt-1 text-sm text-text-400">اختر النوع والنموذج، اكتب البرومبت — واحصل على النتيجة بخطوة واحدة.</p>
-        </div>
+  const showSuccess = !!result && !running;
 
-        <Tabs
-          ariaLabel="نوع التوليد"
-          className="mb-5"
-          value={mode}
-          onChange={setMode}
-          disabled={running}
-          items={[
-            { value: 'image', label: 'توليد صورة', icon: <ImageIcon size={16} /> },
-            { value: 'video', label: 'توليد فيديو', icon: <VideoIcon size={16} /> },
-          ]}
-        />
+  /* ---------- Side panel: Properties form ---------- */
+  const PropertiesForm = (
+    <>
+      <Tabs
+        ariaLabel="نوع التوليد"
+        className="mb-4"
+        value={mode}
+        onChange={setMode}
+        disabled={busy}
+        items={[
+          { value: 'image', label: 'صورة', icon: <ImageIcon size={16} /> },
+          { value: 'video', label: 'فيديو', icon: <VideoIcon size={16} /> },
+        ]}
+      />
 
-        {/* Model */}
-        <div className="mb-4">
-          <Field label="النموذج" htmlFor="model-select" hint={currentModel ? <span dir="ltr">{currentModel.id}</span> : undefined}>
-            {modelsLoading ? (
-              <Skeleton className="h-[50px]" />
-            ) : modelsError ? (
-              <div className="flex items-center gap-2 rounded-mdx border border-[rgba(255,92,122,0.3)] bg-[rgba(255,92,122,0.1)] px-3 py-2.5 text-sm text-[#fda4af]">
-                <AlertCircle size={15} /> {modelsError}
-              </div>
-            ) : (
-              <Select id="model-select" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={running}>
-                {curModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </Select>
+      {/* Model */}
+      <div className="mb-4">
+        <Field label="النموذج" htmlFor="model-select" hint={currentModel ? <span dir="ltr">{currentModel.id}</span> : undefined}>
+          {modelsLoading ? (
+            <Skeleton className="h-[50px]" />
+          ) : modelsError ? (
+            <div className="flex items-center gap-2 rounded-[12px] border border-[rgba(255,91,110,0.3)] bg-[rgba(255,91,110,0.1)] px-3 py-2.5 text-sm text-[#fda4af]">
+              <AlertCircle size={15} /> {modelsError}
+            </div>
+          ) : (
+            <Select id="model-select" value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={busy}>
+              {curModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+
+      {/* Prompt */}
+      <div className="mb-3">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label className="lbl !mb-0" htmlFor="prompt">البرومبت</label>
+          <div className="flex items-center gap-2">
+            {previousPrompt !== null && (
+              <button
+                type="button"
+                onClick={handleUndoEnhance}
+                disabled={busy}
+                className="flex items-center gap-1 text-xs text-[var(--dz-text-3)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Undo2 size={12} /> تراجع
+              </button>
             )}
+            <button
+              type="button"
+              onClick={handleEnhanceClick}
+              disabled={busy || !prompt.trim()}
+              className="flex items-center gap-1.5 rounded-[10px] border border-[rgba(47,109,246,0.4)] bg-[rgba(47,109,246,0.12)] px-2.5 py-1.5 text-xs font-bold text-[#9db9ff] transition-colors hover:bg-[rgba(47,109,246,0.22)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {enhancing ? (
+                <span className="h-3 w-3 animate-spin-slow rounded-full border-2 border-[#9db9ff]/30 border-t-[#9db9ff]" />
+              ) : (
+                <Wand2 size={13} />
+              )}
+              تحسين بالذكاء الاصطناعي
+            </button>
+          </div>
+        </div>
+        <textarea
+          id="prompt"
+          className="prompt-box !min-h-[110px]"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          disabled={busy}
+          placeholder={mode === 'image' ? 'اكتب وصف الصورة التي تريد إنشاءها...' : 'اكتب مشهد الفيديو، الحركة، الإضاءة، والأسلوب...'}
+        />
+        <p className="mt-1.5 text-xs text-[var(--dz-text-3)]">
+          اكتب فكرة بسيطة، وسيقوم الذكاء الاصطناعي بتحويلها إلى برومبت احترافي للتوليد.
+        </p>
+      </div>
+
+      {/* Auto-enhance toggle */}
+      <label className="mb-4 flex cursor-pointer items-center gap-2.5 rounded-[12px] border border-[rgba(47,109,246,0.25)] bg-[rgba(47,109,246,0.08)] px-3.5 py-2.5">
+        <input type="checkbox" checked={autoEnhance} onChange={(e) => setAutoEnhance(e.target.checked)} disabled={busy} className="accent-[#2f6df6]" />
+        <span className="text-sm text-[#dbe0ef]">
+          <Wand2 size={14} className="ml-1.5 inline text-[var(--dz-blue-hover)]" />
+          دع الذكاء الاصطناعي يحسّن برومبتي قبل التوليد
+        </span>
+      </label>
+
+      {/* Style chips (ref screen 3 genres) */}
+      <div className="mb-4">
+        <label className="lbl">الأسلوب البصري</label>
+        <div className="flex flex-wrap gap-2">
+          {STYLE_PRESETS.map((s) => (
+            <button
+              key={s.kw}
+              type="button"
+              disabled={busy}
+              className={`dz-chip ${styles.includes(s.kw) ? 'is-active' : ''}`}
+              onClick={() => setStyles((cur) => toggleIn(cur, s.kw))}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Params */}
+      <div className="param-grid mb-4">
+        {mode === 'image' && supportedKeys.includes('n') && (
+          <Field label="عدد الصور">
+            <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={busy}>
+              {[1, 2, 3, 4].map((x) => (
+                <option key={x} value={x}>{x}</option>
+              ))}
+            </Select>
           </Field>
-        </div>
-
-        {/* Prompt */}
-        <div className="mb-4">
-          <label className="lbl" htmlFor="prompt">البرومبت</label>
-          <textarea
-            id="prompt"
-            className="prompt-box !min-h-[120px]"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            disabled={running}
-            placeholder={mode === 'image' ? 'اكتب وصف الصورة التي تريد إنشاءها...' : 'اكتب مشهد الفيديو، الحركة، الإضاءة، والأسلوب...'}
-          />
-        </div>
-
-        {/* Params */}
-        <div className="param-grid mb-4">
-          {mode === 'image' && supportedKeys.includes('n') && (
-            <Field label="عدد الصور">
-              <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={running}>
-                {[1, 2, 3, 4].map((x) => (
-                  <option key={x} value={x}>{x}</option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          {mode === 'video' && (
-            <Field label="المدة (ثانية)">
-              <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={running} placeholder="تلقائي" />
-            </Field>
-          )}
-          {(mode === 'image' && supportedKeys.includes('resolution')) || mode === 'video' ? (
-            <Field label="الدقة">
-              <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={running}>
-                <option value="">تلقائي</option>
-                {(mode === 'video' ? videoResolutionLabels : imageResolutions).map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
-          <Field label="نسبة الأبعاد">
-            <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={running}>
+        )}
+        {mode === 'video' && (
+          <Field label="المدة (ثانية)">
+            <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} placeholder="تلقائي" />
+          </Field>
+        )}
+        {(mode === 'image' && supportedKeys.includes('resolution')) || mode === 'video' ? (
+          <Field label="الدقة">
+            <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={busy}>
               <option value="">تلقائي</option>
-              {ratioOptions.map((r) => (
+              {(mode === 'video' ? videoResolutionLabels : imageResolutions).map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </Select>
           </Field>
-          {mode === 'image' && supportedKeys.includes('quality') && (
-            <Field label="الجودة">
-              <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={running}>
-                <option value="">تلقائي</option>
-                {['low', 'medium', 'high', 'auto'].map((q) => (
-                  <option key={q} value={q}>{q}</option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          {mode === 'image' && supportedKeys.includes('output_format') && (
-            <Field label="الصيغة">
-              <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={running}>
-                <option value="">تلقائي (PNG)</option>
-                <option value="png">PNG</option>
-                <option value="jpeg">JPEG</option>
-                <option value="webp">WebP</option>
-              </Select>
-            </Field>
-          )}
-        </div>
-
-        {/* Reference image */}
-        <div className="mb-5">
-          <label className="lbl">صورة مرجعية (اختياري) — {mode === 'image' ? 'img2img' : 'image-to-video'}</label>
-          {!referenceImage ? (
-            <>
-              <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} className="hidden" />
-              <button
-                onClick={() => filePRef.current?.click()}
-                disabled={running}
-                className="flex w-full items-center justify-center gap-2 rounded-mdx border border-dashed border-[rgba(134,79,242,0.4)] bg-[rgba(134,79,242,0.06)] px-4 py-4 text-sm text-text-400 transition-colors hover:bg-[rgba(134,79,242,0.1)] disabled:opacity-50"
-              >
-                <Upload size={18} /> ارفع صورة مرجعية
-              </button>
-            </>
-          ) : (
-            <div className="relative overflow-hidden rounded-mdx border border-[rgba(169,154,241,0.14)]">
-              <img src={refPreview} alt="مرجع" className="block max-h-52 w-full object-cover" />
-              <button
-                onClick={clearRef}
-                disabled={running}
-                className="absolute left-2 top-2 flex items-center gap-1.5 rounded-mdx bg-black/70 px-2.5 py-1.5 text-xs text-white"
-              >
-                <X size={14} /> حذف
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Streaming toggle */}
-        {mode === 'image' && supportsStream && (
-          <label className="mb-5 flex cursor-pointer items-center gap-2.5 rounded-mdx border border-[rgba(54,196,240,0.2)] bg-[rgba(54,196,240,0.06)] px-3.5 py-2.5">
-            <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={running} className="accent-[#36C4F0]" />
-            <span className="text-sm text-text-200">
-              <Sparkles size={14} className="ml-1.5 inline text-cyan-500" />
-              السحب المباشر (Streaming) — يعرض الصورة تدريجيًا أثناء التوليد
-            </span>
-          </label>
+        ) : null}
+        <Field label="نسبة الأبعاد">
+          <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={busy}>
+            <option value="">تلقائي</option>
+            {ratioOptions.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </Select>
+        </Field>
+        {mode === 'image' && supportedKeys.includes('quality') && (
+          <Field label="الجودة">
+            <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={busy}>
+              <option value="">تلقائي</option>
+              {['low', 'medium', 'high', 'auto'].map((q) => (
+                <option key={q} value={q}>{q}</option>
+              ))}
+            </Select>
+          </Field>
         )}
+        {mode === 'image' && supportedKeys.includes('output_format') && (
+          <Field label="الصيغة">
+            <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={busy}>
+              <option value="">تلقائي (PNG)</option>
+              <option value="png">PNG</option>
+              <option value="jpeg">JPEG</option>
+              <option value="webp">WebP</option>
+            </Select>
+          </Field>
+        )}
+      </div>
 
-        <Button fullWidth size="lg" onClick={submit} loading={running} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
-          {running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
-          <span className="shine" />
-        </Button>
+      {/* Colour palette (ref screen 3) */}
+      <div className="mb-4">
+        <label className="lbl">الألوان المهيمنة (اختياري)</label>
+        <div className="flex flex-wrap items-center gap-2">
+          {COLOR_PRESETS.map((c) => {
+            const active = colors.includes(c.kw);
+            return (
+              <button
+                key={c.kw}
+                type="button"
+                disabled={busy}
+                title={c.label}
+                aria-label={c.label}
+                aria-pressed={active}
+                onClick={() => setColors((cur) => toggleIn(cur, c.kw))}
+                className={`grid h-8 w-8 place-items-center rounded-full border-2 transition-transform disabled:opacity-50 ${
+                  active ? 'scale-110 border-white' : 'border-transparent hover:scale-105'
+                }`}
+                style={{ background: c.hex }}
+              >
+                {active && <Check size={14} className="text-black/70" />}
+              </button>
+            );
+          })}
+          {colors.length > 0 && (
+            <button type="button" onClick={() => setColors([])} disabled={busy} className="dz-chip !px-2.5" aria-label="مسح الألوان">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
 
-        {error && (
-          <div className="mt-4 flex items-center gap-2 rounded-mdx border border-[rgba(255,92,122,0.3)] bg-[rgba(255,92,122,0.1)] px-3.5 py-3 text-sm text-[#fda4af]">
-            <AlertCircle size={16} /> {error}
+      {/* Reference image */}
+      <div className="mb-4">
+        <label className="lbl">صورة مرجعية (اختياري) — {mode === 'image' ? 'img2img' : 'image-to-video'}</label>
+        {!referenceImage ? (
+          <>
+            <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} className="hidden" />
+            <button
+              onClick={() => filePRef.current?.click()}
+              disabled={busy}
+              className="flex w-full flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[rgba(47,109,246,0.45)] bg-[rgba(47,109,246,0.06)] px-4 py-6 text-sm text-[var(--dz-text-2)] transition-colors hover:bg-[rgba(47,109,246,0.12)] disabled:opacity-50"
+            >
+              <Upload size={20} className="text-[var(--dz-blue-hover)]" />
+              <span>اسحب صورة أو <span className="font-bold text-[var(--dz-blue-hover)]">تصفّح</span></span>
+              <span className="text-[0.7rem] text-[var(--dz-text-3)]">كل صيغ الصور مدعومة</span>
+            </button>
+          </>
+        ) : (
+          <div className="relative overflow-hidden rounded-[14px] border border-[var(--dz-border)]">
+            <img src={refPreview} alt="مرجع" className="block max-h-52 w-full object-cover" />
+            <button
+              onClick={clearRef}
+              disabled={busy}
+              className="absolute left-2 top-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white"
+            >
+              <X size={14} /> حذف
+            </button>
           </div>
         )}
-      </Card>
+      </div>
 
-      {/* PREVIEW (left in RTL) */}
-      <Card className={`glass-mobile-sm flex min-h-[440px] flex-col ${running ? 'gen-border-active' : ''}`}>
-        <h3 className="mb-4 font-display text-lg font-bold text-text-100">النتيجة</h3>
+      {/* Streaming toggle */}
+      {mode === 'image' && supportsStream && (
+        <label className="mb-4 flex cursor-pointer items-center gap-2.5 rounded-[12px] border border-[rgba(40,215,255,0.22)] bg-[rgba(40,215,255,0.06)] px-3.5 py-2.5">
+          <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={busy} className="accent-[#28d7ff]" />
+          <span className="text-sm text-[#dbe0ef]">
+            <Sparkles size={14} className="ml-1.5 inline text-[var(--dz-cyan)]" />
+            السحب المباشر (Streaming) — يعرض الصورة تدريجيًا أثناء التوليد
+          </span>
+        </label>
+      )}
 
-        {running && (
+      <Button fullWidth size="lg" onClick={submit} loading={busy} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
+        {enhancing ? 'جاري تحسين البرومبت...' : running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
+        <span className="shine" />
+      </Button>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-2 rounded-[12px] border border-[rgba(255,91,110,0.3)] bg-[rgba(255,91,110,0.1)] px-3.5 py-3 text-sm text-[#fda4af]">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
+    </>
+  );
+
+  /* ---------- Side panel: Info tab ---------- */
+  const InfoPanel = (
+    <div className="space-y-4 text-sm">
+      {currentModel ? (
+        <>
+          <div>
+            <div className="lbl">النموذج الحالي</div>
+            <div className="rounded-[12px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-3">
+              <div className="font-bold text-white">{currentModel.name}</div>
+              <div dir="ltr" className="mt-1 truncate text-xs text-[var(--dz-text-3)]">{currentModel.id}</div>
+              {supportsStream && (
+                <span className="badge badge-cyan mt-2">
+                  <Sparkles size={11} /> يدعم السحب المباشر
+                </span>
+              )}
+            </div>
+          </div>
+          {supportedKeys.length > 0 && (
+            <div>
+              <div className="lbl">الخصائص المدعومة</div>
+              <div className="flex flex-wrap gap-1.5">
+                {supportedKeys.map((k) => (
+                  <span key={k} dir="ltr" className="badge">{k}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {mode === 'video' && videoResolutions.length > 0 && (
+            <div>
+              <div className="lbl">دقات مدعومة</div>
+              <div className="flex flex-wrap gap-1.5">
+                {videoResolutions.map((r) => (
+                  <span key={r} dir="ltr" className="badge">{r}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {mode === 'video' && videoRatios.length > 0 && (
+            <div>
+              <div className="lbl">نسب أبعاد مدعومة</div>
+              <div className="flex flex-wrap gap-1.5">
+                {videoRatios.map((r) => (
+                  <span key={r} dir="ltr" className="badge">{r}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-[var(--dz-text-2)]">اختر نموذجًا من تبويب الخصائص لعرض تفاصيله.</p>
+      )}
+      <div className="rounded-[12px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-3 text-xs leading-relaxed text-[var(--dz-text-2)]">
+        💡 نصيحة: صف الموضوع، الإضاءة، زاوية الكاميرا، والأسلوب. أو اكتب فكرة قصيرة واستخدم «تحسين بالذكاء الاصطناعي».
+      </div>
+    </div>
+  );
+
+  /* ---------- Side panel: Success state (ref screen 2) ---------- */
+  const SuccessPanel = result && (
+    <div className="flex flex-col items-center pt-6 text-center">
+      <span className="grid h-14 w-14 place-items-center rounded-full border border-[rgba(53,214,122,0.4)] bg-[rgba(53,214,122,0.12)] text-[var(--dz-green)]">
+        <CheckCircle2 size={28} />
+      </span>
+      <h3 className="mt-3 text-lg font-extrabold text-[var(--dz-green)]">تم التوليد بنجاح!</h3>
+      <p className="mt-1 text-xs text-[var(--dz-text-3)]">عمل رائع — نتيجتك جاهزة للتنزيل والمشاركة.</p>
+
+      <div className="mt-5 w-full space-y-2.5">
+        {result.assets.length > 0 && (
+          <Button
+            fullWidth
+            onClick={() =>
+              result.assets.forEach((a, i) => downloadAsset(a, `orms-${result.id}-${i}.${mode === 'image' ? 'png' : 'mp4'}`))
+            }
+            leftIcon={<Download size={17} />}
+          >
+            تنزيل {result.assets.length > 1 ? `(${result.assets.length})` : ''}
+            <span className="shine" />
+          </Button>
+        )}
+        <Button fullWidth variant="secondary" onClick={() => setResult(null)} leftIcon={<RefreshCw size={16} />}>
+          توليد آخر
+        </Button>
+        <Button fullWidth variant="ghost" onClick={copyPrompt} leftIcon={copied ? <Check size={16} className="text-[var(--dz-green)]" /> : <Copy size={16} />}>
+          {copied ? 'تم النسخ!' : 'نسخ البرومبت'}
+        </Button>
+      </div>
+
+      {/* Metadata */}
+      <dl className="mt-6 w-full space-y-2 border-t border-[var(--dz-border)] pt-4 text-sm">
+        {(
+          [
+            ['النوع', mode === 'image' ? 'صورة' : 'فيديو'],
+            ['النموذج', currentModel?.name || selectedModelId],
+            ['عدد الأصول', String(result.assets.length)],
+            result.cost != null ? ['التكلفة', `$${Number(result.cost).toFixed(4)}`] : null,
+            result.at ? ['التاريخ', new Date(result.at).toLocaleString('ar', { dateStyle: 'medium', timeStyle: 'short' })] : null,
+          ].filter(Boolean) as [string, string][]
+        ).map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between gap-3">
+            <dt className="shrink-0 text-[var(--dz-text-3)]">{k}</dt>
+            <dd className="truncate font-semibold text-[#dbe0ef]">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+
+  return (
+    <div className="gen-layout-v2">
+      {/* PREVIEW PANEL — dominant, reading-start side (right in RTL) */}
+      <section
+        aria-label="المعاينة"
+        className={`relative flex min-h-[480px] flex-col overflow-hidden rounded-[22px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-4 lg:min-h-[620px] ${
+          running ? 'gen-border-active' : ''
+        }`}
+      >
+        {busy && (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-            <div className="spin-slow h-16 w-16 rounded-full" style={{ border: '4px solid rgba(134,79,242,0.18)', borderTopColor: 'var(--primary-500)' }} />
-            <div className="text-sm text-text-400">{pollingText || 'جاري التوليد...'}</div>
+            <div className="spin-slow h-16 w-16 rounded-full" style={{ border: '4px solid rgba(47,109,246,0.2)', borderTopColor: 'var(--dz-blue)' }} />
+            <div className="text-sm text-[var(--dz-text-2)]">{enhancing ? 'جاري تحسين البرومبت...' : pollingText || 'جاري التوليد...'}</div>
             {mode === 'image' && useStreaming && supportsStream && partialProgress > 0 && (
-              <div className="text-xs text-cyan-500">تم استلام {partialProgress} تحديثًا...</div>
+              <div className="text-xs text-[var(--dz-cyan)]">تم استلام {partialProgress} تحديثًا...</div>
             )}
           </div>
         )}
 
-        {!running && !result && (
+        {!busy && !result && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-            <span className="grid h-16 w-16 place-items-center rounded-full bg-[rgba(134,79,242,0.1)]">
-              <Wallpaper size={30} className="text-text-400/60" />
+            <span className="grid h-20 w-20 place-items-center rounded-[24px] bg-[rgba(47,109,246,0.12)]">
+              <Wallpaper size={34} className="text-[var(--dz-blue-hover)]" />
             </span>
-            <div className="text-sm text-text-400">النتيجة ستظهر هنا بعد التوليد</div>
+            <div className="text-sm font-semibold text-[#dbe0ef]">معاينتك ستظهر هنا</div>
+            <div className="max-w-xs text-xs leading-relaxed text-[var(--dz-text-3)]">
+              اكتب البرومبت في لوحة الخصائص، اختر الأسلوب والإعدادات، ثم اضغط «توليد».
+            </div>
             <div className="mt-1 flex flex-wrap justify-center gap-1.5">
               {['سينمائي', 'واقعي', 'إعلان منتج', '3D'].map((t) => (
-                <span key={t} className="badge">{t}</span>
+                <span key={t} className="dz-chip !cursor-default">{t}</span>
               ))}
             </div>
           </div>
         )}
 
-        {result && !running && (
-          <div className="flex-1">
-            <div className="mb-3 flex items-center gap-2 text-sm text-success-500">
-              <CheckCircle2 size={16} /> تم بنجاح {result.cost != null && <>— التكلفة: ${Number(result.cost).toFixed(4)}</>}
-            </div>
-            <div className={`grid gap-4 ${result.assets.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {showSuccess && result && (
+          <div className="flex flex-1 flex-col">
+            <div className={`grid flex-1 content-center gap-4 ${result.assets.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
               {result.assets.map((a, i) => (
-                <div key={i} className="relative overflow-hidden rounded-mdx border border-[rgba(169,154,241,0.14)] bg-bg-950">
+                <div key={i} className="group relative overflow-hidden rounded-[16px] border border-[var(--dz-border)] bg-[var(--dz-bg)]">
                   {mode === 'image' ? (
-                    <img src={a} alt={`نتيجة ${i + 1}`} className="block w-full" />
+                    <img src={a} alt={`نتيجة ${i + 1}`} className="mx-auto block max-h-[70vh] w-auto max-w-full" />
                   ) : (
-                    <video src={a} controls playsInline className="block w-full" />
+                    <video src={a} controls playsInline className="block max-h-[70vh] w-full" />
                   )}
                   <button
                     onClick={() => downloadAsset(a, `orms-${result.id}-${i}.${mode === 'image' ? 'png' : 'mp4'}`)}
-                    className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-mdx bg-black/70 px-2.5 py-1.5 text-xs text-white"
+                    className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <Download size={14} /> تنزيل
                   </button>
                 </div>
               ))}
             </div>
-            <Button variant="secondary" size="sm" className="mt-5" onClick={() => setResult(null)} leftIcon={<RefreshCw size={14} />}>
-              توليد آخر
-            </Button>
           </div>
         )}
-      </Card>
+      </section>
+
+      {/* SIDE PANEL — Properties / Info tabs, or success state after completion */}
+      <aside className="overflow-hidden rounded-[22px] border border-[var(--dz-border)] bg-[var(--dz-card)] p-5" aria-label="الإعدادات">
+        {showSuccess ? (
+          SuccessPanel
+        ) : (
+          <>
+            <div className="mb-5 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-extrabold text-white">إنشاء جديد</h2>
+                <p className="mt-0.5 text-xs text-[var(--dz-text-3)]">برومبت واحد يفصلك عن نتيجة مذهلة.</p>
+              </div>
+              <div className="segmented !p-1" role="tablist" aria-label="لوحة الإعدادات">
+                <button
+                  role="tab"
+                  aria-selected={panelTab === 'props'}
+                  className={`segmented-tab !px-3 !py-1.5 !text-xs ${panelTab === 'props' ? 'is-active' : ''}`}
+                  onClick={() => setPanelTab('props')}
+                >
+                  <SlidersHorizontal size={13} /> خصائص
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={panelTab === 'info'}
+                  className={`segmented-tab !px-3 !py-1.5 !text-xs ${panelTab === 'info' ? 'is-active' : ''}`}
+                  onClick={() => setPanelTab('info')}
+                >
+                  <Info size={13} /> معلومات
+                </button>
+              </div>
+            </div>
+            {panelTab === 'props' ? PropertiesForm : InfoPanel}
+          </>
+        )}
+      </aside>
     </div>
   );
 }
