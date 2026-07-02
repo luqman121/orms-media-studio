@@ -15,7 +15,7 @@ import {
   CheckCircle2,
   X,
 } from 'lucide-react';
-import { api, getToken } from '../../../lib/api';
+import { api, getToken, type ApiError } from '../../../lib/api';
 import Card from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
 import Tabs from '../../../components/ui/Tabs';
@@ -193,7 +193,10 @@ export default function GeneratePage() {
         setResult({ status: 'completed', assets, cost: r.cost, id: r.id });
       }
     } catch (e) {
-      setError((e as Error).message || 'فشل توليد الصورة');
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل توليد الصورة';
+      setError(detail && detail !== base ? `${base} — ${detail}` : base);
     } finally {
       setRunning(false);
       setPartialProgress(0);
@@ -233,7 +236,15 @@ export default function GeneratePage() {
           } else if (p.status === 'failed') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
-            setError('فشل توليد الفيديو');
+            // Surface the stored failure reason (provider error, R2 upload, timeout…).
+            let reason = '';
+            try {
+              const detail = await api.get<{ error?: string }>(`/api/generate/generations/${genId}`);
+              reason = detail.error || '';
+            } catch {
+              /* fall back to generic message */
+            }
+            setError(reason ? `فشل توليد الفيديو — ${reason}` : 'فشل توليد الفيديو');
             setPollingText('');
             setRunning(false);
           } else {
@@ -244,7 +255,10 @@ export default function GeneratePage() {
         }
       }, 8000);
     } catch (e) {
-      setError((e as Error).message || 'فشل إرسال طلب الفيديو');
+      const err = e as ApiError;
+      const detail = (err.data as { detail?: string } | undefined)?.detail;
+      const base = err.message || 'فشل إرسال طلب الفيديو';
+      setError(detail && detail !== base ? `${base} — ${detail}` : base);
       setRunning(false);
       setPollingText('');
     }

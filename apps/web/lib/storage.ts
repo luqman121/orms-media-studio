@@ -12,11 +12,21 @@ let _client: S3Client | null = null;
 
 function r2(): S3Client {
   if (_client) return _client;
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  // Trim to tolerate stray whitespace/newlines that dashboards often paste in.
+  const accountId = process.env.R2_ACCOUNT_ID?.trim();
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
   if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error('R2 not configured — set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY');
+  }
+  // A Cloudflare account id is exactly 32 hex chars. A malformed value (e.g. a stray
+  // leading character) yields an unresolvable *.r2.cloudflarestorage.com host and an
+  // opaque SSL/handshake error at upload time — fail fast with an actionable message.
+  if (!/^[0-9a-f]{32}$/i.test(accountId)) {
+    throw new Error(
+      `R2_ACCOUNT_ID is malformed (expected 32 hex characters, got ${accountId.length}: "${accountId}") — ` +
+        'check for a typo or stray character in the env var.',
+    );
   }
   _client = new S3Client({
     region: 'auto',
