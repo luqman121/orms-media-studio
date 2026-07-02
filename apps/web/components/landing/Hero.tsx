@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Sparkles, Image as ImageIcon, Video, Wand2, Play, ArrowLeft } from 'lucide-react';
 
@@ -10,9 +10,49 @@ const modes = [
   { key: '3d', label: '3D', icon: Wand2, placeholder: 'مجسّم ثلاثي الأبعاد لعبوة منتج، خامة زجاجية، انعكاسات ناعمة، خلفية داكنة' },
 ] as const;
 
+const showcaseModels = ['Sora 2', 'Veo 3.1', 'Flux', 'Kling v3', 'Wan 2.7', 'Seedance', 'GPT-Image', 'Gemini', 'Hailuo', 'Grok'];
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
 export default function Hero() {
   const [mode, setMode] = useState<(typeof modes)[number]['key']>('image');
+  const [manual, setManual] = useState(false);
   const active = modes.find((m) => m.key === mode)!;
+
+  // Typewriter effect — re-types the active mode's prompt whenever it changes.
+  const [typed, setTyped] = useState('');
+  useEffect(() => {
+    const full = active.placeholder;
+    if (prefersReducedMotion()) {
+      setTyped(full);
+      return;
+    }
+    setTyped('');
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setTyped(full.slice(0, i));
+      if (i >= full.length) clearInterval(id);
+    }, 26);
+    return () => clearInterval(id);
+  }, [active.placeholder]);
+
+  // Gently cycle the modes to showcase them — stops the moment the user picks one.
+  useEffect(() => {
+    if (manual || prefersReducedMotion()) return;
+    const id = setInterval(() => {
+      setMode((prev) => {
+        const idx = modes.findIndex((m) => m.key === prev);
+        return modes[(idx + 1) % modes.length].key;
+      });
+    }, 4600);
+    return () => clearInterval(id);
+  }, [manual]);
+
+  // Pointer-tracking spotlight on the demo card.
+  const [spot, setSpot] = useState({ x: 50, y: 28 });
 
   return (
     <section className="relative overflow-hidden pt-[72px]">
@@ -24,11 +64,19 @@ export default function Hero() {
         className="glow-orb h-[420px] w-[420px] left-[-6%] top-40 animate-float-slow"
         style={{ background: 'radial-gradient(circle, rgba(54,196,240,0.22), transparent 70%)' }}
       />
+      <div
+        aria-hidden
+        className="glow-orb h-[360px] w-[360px] left-1/2 top-[560px] -translate-x-1/2 animate-pulse-glow"
+        style={{ background: 'radial-gradient(circle, rgba(154,104,255,0.16), transparent 70%)' }}
+      />
 
       <div className="relative mx-auto max-w-[1280px] px-4 pb-24 pt-16 sm:px-6 sm:pt-24">
         <div className="mx-auto max-w-[920px] text-center">
           <span className="badge mx-auto animate-fade-up">
-            <Sparkles size={13} className="text-cyan-500" />
+            <span className="relative flex h-2 w-2" aria-hidden>
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-500 opacity-70" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-cyan-500" />
+            </span>
             مولّد الصور والفيديو بالذكاء الاصطناعي عبر OpenRouter
           </span>
 
@@ -37,7 +85,7 @@ export default function Hero() {
             style={{ animationDelay: '60ms' }}
           >
             حوّل فكرة واحدة إلى
-            <br className="hidden sm:block" /> <span className="gradient-text">صور وفيديوهات</span> احترافية
+            <br className="hidden sm:block" /> <span className="gradient-text-sheen">صور وفيديوهات</span> احترافية
           </h1>
 
           <p
@@ -57,18 +105,49 @@ export default function Hero() {
               <Play size={16} /> شاهد كيف يعمل
             </a>
           </div>
+
+          {/* Model marquee — social proof */}
+          <div className="mt-10 animate-fade-up" style={{ animationDelay: '220ms' }}>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-500">مدعوم بأفضل نماذج الذكاء الاصطناعي</p>
+            <div className="marquee-mask relative overflow-hidden">
+              <div className="flex w-max gap-3 animate-marquee">
+                {[...showcaseModels, ...showcaseModels].map((name, i) => (
+                  <span key={i} className="badge whitespace-nowrap">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Prompt preview card */}
-        <div id="demo" className="relative mx-auto mt-16 max-w-[860px] animate-fade-up" style={{ animationDelay: '240ms' }}>
-          <div className="card glow-soft p-4 sm:p-6">
-            <div className="segmented mb-4 max-w-md">
+        <div
+          id="demo"
+          className="group relative mx-auto mt-16 max-w-[860px] animate-fade-up"
+          style={{ animationDelay: '260ms' }}
+          onMouseMove={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setSpot({ x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 });
+          }}
+        >
+          <div className="card gen-border-active glow-soft relative p-4 sm:p-6">
+            {/* pointer spotlight */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-[22px] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+              style={{ background: `radial-gradient(480px circle at ${spot.x}% ${spot.y}%, rgba(54,196,240,0.12), transparent 60%)` }}
+            />
+            <div className="segmented relative mb-4 max-w-md">
               {modes.map((m) => {
                 const Icon = m.icon;
                 return (
                   <button
                     key={m.key}
-                    onClick={() => setMode(m.key)}
+                    onClick={() => {
+                      setManual(true);
+                      setMode(m.key);
+                    }}
                     className={`segmented-tab ${m.key === mode ? 'is-active' : ''}`}
                   >
                     <Icon size={15} /> {m.label}
@@ -77,8 +156,11 @@ export default function Hero() {
               })}
             </div>
 
-            <div className="prompt-box flex flex-col justify-between text-right" role="textbox" aria-readonly>
-              <p className="text-text-200">{active.placeholder}</p>
+            <div className="prompt-box relative flex flex-col justify-between text-right" role="textbox" aria-readonly>
+              <p className="text-text-200">
+                {typed}
+                <span className="type-caret" aria-hidden />
+              </p>
               <div className="mt-4 flex items-center justify-between">
                 <div className="flex gap-1.5">
                   <span className="badge badge-cyan">OpenRouter</span>

@@ -468,6 +468,52 @@ label.lbl {
 }
 
 /* ============================================================
+   Landing hero — animated headline sheen, typing caret, marquee mask
+   (additive; the global reduced-motion rule below disables the motion)
+   ============================================================ */
+.gradient-text-sheen {
+  background: linear-gradient(100deg, #a77bff 0%, #6b8cff 28%, #eaf1ff 50%, #36c4f0 72%, #a77bff 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: heroSheen 6s linear infinite;
+}
+@keyframes heroSheen {
+  to {
+    background-position: 220% center;
+  }
+}
+
+.type-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-inline-start: 3px;
+  vertical-align: -0.14em;
+  border-radius: 2px;
+  background: var(--cyan-500);
+  box-shadow: 0 0 8px rgba(54, 196, 240, 0.8);
+  animation: caretBlink 1.05s steps(1) infinite;
+}
+@keyframes caretBlink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+
+/* ============================================================
    Legacy responsive layout classes (still used by pages)
    ============================================================ */
 .gen-layout {
