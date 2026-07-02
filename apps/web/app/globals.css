@@ -34,6 +34,12 @@
   --gradient-brand: linear-gradient(135deg, #864ff2 0%, #6b59e6 42%, #36c4f0 100%);
   --gradient-text: linear-gradient(90deg, #a77bff 0%, #6b8cff 45%, #36c4f0 100%);
 
+  /* Primary-button skin — violet by default, overridden to electric blue
+     inside the dashboard theme (.dz) so one Button works in both worlds. */
+  --btn-grad: linear-gradient(135deg, #864ff2, #6b59e6 50%, #36c4f0);
+  --btn-shadow: 0 16px 40px rgba(134, 79, 242, 0.28);
+  --btn-shadow-hover: 0 20px 55px rgba(134, 79, 242, 0.38);
+
   --radius-sm: 10px;
   --radius-md: 16px;
   --radius-lg: 22px;
@@ -148,7 +154,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
-  background: linear-gradient(135deg, #864ff2, #6b59e6 50%, #36c4f0);
+  background: var(--btn-grad);
   color: #fff;
   border-radius: var(--radius-md);
   font-weight: 800;
@@ -157,12 +163,12 @@ body {
   border: none;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.25s ease, filter 0.2s ease;
-  box-shadow: 0 16px 40px rgba(134, 79, 242, 0.28);
+  box-shadow: var(--btn-shadow);
 }
 .btn-primary:hover,
 .btn-brand:hover {
   transform: translateY(-1px);
-  box-shadow: 0 20px 55px rgba(134, 79, 242, 0.38);
+  box-shadow: var(--btn-shadow-hover);
 }
 .btn-primary:disabled,
 .btn-brand:disabled {
@@ -538,6 +544,186 @@ label.lbl {
 @media (max-width: 600px) {
   body {
     font-size: 14px;
+  }
+}
+
+/* ============================================================
+   Dashboard theme (.dz) — premium navy media-studio look.
+   Scoped so the landing/auth pages keep the midnight-violet brand.
+   Palette per the dashboard redesign spec (ref screens 1–3).
+   ============================================================ */
+.dz {
+  --dz-bg: #111322;
+  --dz-panel: #171a2c;
+  --dz-sidebar: #151829;
+  --dz-card: #1d2135;
+  --dz-card-soft: #22263b;
+  --dz-border: rgba(255, 255, 255, 0.08);
+  --dz-border-strong: rgba(255, 255, 255, 0.14);
+  --dz-text-2: #a7aec6;
+  --dz-text-3: #6f7690;
+  --dz-blue: #2f6df6;
+  --dz-blue-hover: #4a82ff;
+  --dz-cyan: #28d7ff;
+  --dz-green: #35d67a;
+  --dz-red: #ff5b6e;
+
+  /* Blue primary button inside the dashboard */
+  --btn-grad: linear-gradient(135deg, #2f6df6, #4a82ff);
+  --btn-shadow: 0 12px 32px rgba(47, 109, 246, 0.32);
+  --btn-shadow-hover: 0 16px 44px rgba(47, 109, 246, 0.45);
+
+  background: var(--dz-bg);
+  color: #fff;
+}
+
+/* --- Re-skin shared primitives inside the dashboard scope --- */
+.dz .card {
+  background: var(--dz-card);
+  border-color: var(--dz-border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.dz .card-hover:hover {
+  border-color: var(--dz-border-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.dz .card-featured {
+  background: linear-gradient(180deg, rgba(47, 109, 246, 0.12), var(--dz-card)), var(--dz-card);
+  border-color: rgba(47, 109, 246, 0.35);
+  box-shadow: 0 18px 60px rgba(47, 109, 246, 0.14);
+}
+.dz .field,
+.dz .input {
+  background: var(--dz-panel);
+  border-color: var(--dz-border);
+}
+.dz .field:focus,
+.dz .input:focus {
+  border-color: var(--dz-blue);
+  box-shadow: 0 0 0 4px rgba(47, 109, 246, 0.16);
+}
+.dz select.field option {
+  background: var(--dz-panel);
+}
+.dz .prompt-box {
+  background: var(--dz-panel);
+  border-color: var(--dz-border-strong);
+  border-radius: var(--radius-md);
+}
+.dz .prompt-box:focus {
+  border-color: var(--dz-blue);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 4px rgba(47, 109, 246, 0.16);
+}
+.dz .segmented {
+  background: var(--dz-panel);
+  border-color: var(--dz-border);
+}
+.dz .segmented-tab.is-active {
+  background: var(--dz-blue);
+  box-shadow: 0 8px 22px rgba(47, 109, 246, 0.32);
+}
+.dz .skeleton {
+  background: linear-gradient(90deg, #1d2135 0%, #262b44 50%, #1d2135 100%);
+  background-size: 200% 100%;
+}
+.dz .badge {
+  background: rgba(47, 109, 246, 0.14);
+  border-color: rgba(47, 109, 246, 0.3);
+}
+.dz .badge-success {
+  background: rgba(53, 214, 122, 0.12);
+  border-color: rgba(53, 214, 122, 0.3);
+  color: #8ef0b6;
+}
+.dz label.lbl {
+  color: var(--dz-text-2);
+}
+.dz ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+/* Text-token remap so existing pages read correctly on navy */
+.dz .text-text-100 { color: #ffffff; }
+.dz .text-text-200 { color: #dbe0ef; }
+.dz .text-text-400 { color: var(--dz-text-2); }
+.dz .text-text-500 { color: var(--dz-text-3); }
+
+/* --- Sidebar navigation --- */
+.dz-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0 0.9rem;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--dz-text-2);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.dz-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.dz-nav-item.is-active {
+  background: var(--dz-blue);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(47, 109, 246, 0.35);
+}
+
+/* --- Filter chips (gallery categories / style presets) --- */
+.dz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--dz-border);
+  background: var(--dz-panel);
+  color: var(--dz-text-2);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.dz-chip:hover {
+  border-color: var(--dz-border-strong);
+  color: #fff;
+}
+.dz-chip.is-active {
+  background: rgba(47, 109, 246, 0.2);
+  border-color: var(--dz-blue);
+  color: #fff;
+}
+.dz-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Masonry gallery (ref screen 1) --- */
+.dz-masonry {
+  columns: 230px;
+  column-gap: 1rem;
+}
+.dz-mitem {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+/* --- Generator layout v2 (ref screens 2–3): big preview + side panel --- */
+.gen-layout-v2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 1.25rem;
+  align-items: start;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+@media (max-width: 1024px) {
+  .gen-layout-v2 {
+    grid-template-columns: 1fr;
+    gap: 1rem;
   }
 }
 

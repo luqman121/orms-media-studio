@@ -23,7 +23,8 @@ const sizes: Record<Size, string> = {
 
 const variants: Record<Variant, string> = {
   primary:
-    'text-white bg-[linear-gradient(135deg,#864FF2,#6B59E6_50%,#36C4F0)] shadow-[0_16px_40px_rgba(134,79,242,0.28)] hover:-translate-y-px hover:shadow-[0_20px_55px_rgba(134,79,242,0.38)]',
+    // Skin comes from CSS vars: violet on the landing/auth, electric blue inside .dz.
+    'text-white bg-[image:var(--btn-grad)] shadow-[var(--btn-shadow)] hover:-translate-y-px hover:shadow-[var(--btn-shadow-hover)]',
   secondary:
     'text-text-100 bg-white/[0.04] border border-[rgba(169,154,241,0.18)] hover:bg-[rgba(169,154,241,0.10)] hover:border-[rgba(169,154,241,0.32)] hover:-translate-y-px',
   ghost: 'text-text-400 hover:text-text-100 hover:bg-[rgba(169,154,241,0.08)]',
