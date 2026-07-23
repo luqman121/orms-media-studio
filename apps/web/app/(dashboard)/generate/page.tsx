@@ -285,8 +285,16 @@ export default function GeneratePage() {
               if (evt.type === 'partial') {
                 setPartialProgress((p) => p + 1);
               } else if (evt.type === 'completed') {
-                collected.push(`/api/assets/${evt.filename}`);
-                setResult({ status: 'completed', assets: [...collected], cost: evt.cost, id: evt.id, at: Date.now() });
+                // The browser cannot attach a Bearer header to <img src>, so
+                // fetch short-lived signed asset_urls from the authenticated
+                // generation detail endpoint (mirrors the video poll path).
+                try {
+                  const detail = await api.get<{ asset_urls?: string[]; cost?: string }>(`/api/generate/generations/${evt.id}`);
+                  const assets = detail.asset_urls || [];
+                  setResult({ status: 'completed', assets, cost: detail.cost ?? evt.cost, id: evt.id, at: Date.now() });
+                } catch {
+                  setResult({ status: 'completed', assets: [...collected], cost: evt.cost, id: evt.id, at: Date.now() });
+                }
               } else if (evt.type === 'error') {
                 throw new Error(evt.error?.message || 'خطأ في السحب المباشر');
               }
@@ -297,8 +305,11 @@ export default function GeneratePage() {
         }
       } else {
         const r = await api.post<{ assets?: { filename: string }[]; cost?: string; id?: number }>('/api/generate/image', fd);
-        const assets = (r.assets || []).map((a) => `/api/assets/${a.filename}`);
-        setResult({ status: 'completed', assets, cost: r.cost, id: r.id, at: Date.now() });
+        // Fetch short-lived signed asset_urls from the authenticated generation
+        // detail endpoint so <img src> works without a Bearer header.
+        const detail = await api.get<{ asset_urls?: string[]; cost?: string }>(`/api/generate/generations/${r.id}`);
+        const assets = detail.asset_urls || [];
+        setResult({ status: 'completed', assets, cost: detail.cost ?? r.cost, id: r.id, at: Date.now() });
       }
     } catch (e) {
       const err = e as ApiError;

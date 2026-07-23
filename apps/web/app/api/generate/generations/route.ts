@@ -2,7 +2,7 @@
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
-import { serializeGeneration } from '@/lib/serialize';
+import { serializeGenerationWithSignedUrls } from '@/lib/serialize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,8 @@ export async function GET(req: Request) {
       take: limit,
       skip: offset,
     });
-    return json({ data: rows.map(serializeGeneration), limit, offset });
+    const data = await Promise.all(rows.map(serializeGenerationWithSignedUrls));
+    return json({ data, limit, offset });
   } catch (e) {
     return handleError(e);
   }

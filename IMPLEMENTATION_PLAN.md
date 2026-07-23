@@ -47,6 +47,20 @@ This is the authoritative implementation handoff for **Increment 1** of the ORMS
 > 4. `JWT_SECRET` missing at build → auth used an insecure dev fallback — treat as a
 >    **required runtime/security config check**; never commit a real secret.
 > Baseline is clean enough to begin Phase 2b.
+>
+> **Phase 2b security audit (orms-security, read-only) — PASS-WITH-FINDINGS.**
+> No Critical/High issues. Cross-user denial verified sound on SSE, assets route,
+> generation list/detail/delete, and signed serializer. Remediations applied:
+> `Referrer-Policy: no-referrer` on the asset 307; positive-integer `id` guard on
+> `/generations/[id]` GET+DELETE; defense-in-depth `userId` re-scoping on SSE status
+> re-checks. Accepted limitations: (1) legacy `Generation.assetPath` exact-match
+> fallback only matches single-key rows — the normalized `Asset` rows (Slices 1/2) are
+> the authoritative ownership record for multi-asset generations; (2) a 5-min signed
+> URL is a bearer token within its TTL — mitigated by the short TTL + no-referrer.
+> Blocking gate from `orms-asset-security` definition of done: the required regression
+> tests (unauth / wrong-user / missing / owner / traversal / SSE replay / cross-user SSE)
+> are deferred to Phase 5 (no test runner installed yet). Runtime credit/SSE/provider/
+> signing behavior is UNVERIFIED until then.
 
 **Commits that contain the real Increment 1 work (on the feature branch, NOT on main):**
 
@@ -277,24 +291,24 @@ normalize error (model-router normalizeError → Arabic message)
 → return a safe Arabic error (lib/http handleError)
 ```
 
-- [ ] Wire the above into `apps/web/app/api/generate/image/route.ts` (sync + SSE paths).
-- [ ] Wire into `apps/web/app/api/generate/video/route.ts`, `apps/worker/src/processor.ts`,
-      and the in-process fallback `apps/web/lib/videoPoll.ts` (both must write identical `RunEvent`s).
-- [ ] Persist `RunEvent`s with a **monotonic `seq`** per generation.
+- [x] Wire the above into `apps/web/app/api/generate/image/route.ts` (sync path; SSE stream path remains upstream-proxy and is a future slice) — done in `420e5b8`.
+- [x] Wire into `apps/web/app/api/generate/video/route.ts`, `apps/worker/src/processor.ts`,
+      and the in-process fallback `apps/web/lib/videoPoll.ts` (both must write identical `RunEvent`s) — done in `420e5b8`; worker + poller emit identical event sequences.
+- [x] Persist `RunEvent`s with a **monotonic `seq`** per generation — `@orms/generation-runtime` `appendRunEvent` (max+1 transactional + P2002 retry).
 
 **Durable SSE endpoint** (new, e.g. `GET /api/generate/generations/[id]/events`):
 
-- [ ] Authenticate (`requireAuth`) and verify **generation ownership**.
-- [ ] Source events from the **persisted `RunEvent` table** (not an in-memory emitter only).
-- [ ] **Ordered replay** from `Last-Event-ID`; heartbeats; supports reconnection.
-- [ ] Close on terminal state. **No cross-user leaks.** Survives a page refresh.
+- [x] Authenticate (`requireAuth`) and verify **generation ownership** — `findFirst({ where: { id, userId } })`.
+- [x] Source events from the **persisted `RunEvent` table** (not an in-memory emitter only) — DB polling (1s), no Redis/in-memory emitter.
+- [x] **Ordered replay** from `Last-Event-ID`; heartbeats (15s); supports reconnection — SSE `id` is `RunEvent.seq`.
+- [x] Close on terminal state. **No cross-user leaks.** Survives a page refresh.
 
 **Asset route security** (fix `GET /api/assets/[filename]`, currently unauthenticated):
 
-- [ ] Require authentication **and** verify the caller **owns** the `Asset`/`Generation`.
-- [ ] Do **not** authorize based on the object key alone (keys are guessable today).
-- [ ] Keep storage **private**; issue **short-lived signed** access or safely proxy.
-- [ ] Note: `<img>`/`<video>` tags cannot send a `Bearer` header — use a signed/tokenized URL
+- [x] Require authentication **and** verify the caller **owns** the `Asset`/`Generation` — `requireAuth` + `findFirst({ storageKey, userId })` + legacy `Generation.assetPath` fallback.
+- [x] Do **not** authorize based on the object key alone (keys are guessable today) — ownership DB lookup precedes any signing.
+- [x] Keep storage **private**; issue **short-lived signed** access or safely proxy — 300s signed R2 URLs via `getSignedDownloadUrl`; bucket stays private; `Referrer-Policy: no-referrer` on the 307.
+- [x] Note: `<img>`/`<video>` tags cannot send a `Bearer` header — use a signed/tokenized URL
       minted by an authenticated endpoint (or a same-origin authenticated proxy). Design for this.
 - [ ] Tests for **unauthenticated**, **wrong-user**, **missing**, and **owner** access.
 
