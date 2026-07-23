@@ -6,7 +6,7 @@
 // in favor of a Redis key with a 1h TTL. Do not build new features on it.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // native = local dev engine; debian-openssl-3.0.x = the node:24-bookworm Docker runtime.
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
@@ -25,33 +25,49 @@ model User {
 
   generations    Generation[]
   uploadedImages UploadedImage[]
+  projects       Project[]
+  assets         Asset[]
+  runEvents      RunEvent[]
+  creditWallet   CreditWallet?
+  creditLedger   CreditLedger[]
 
   @@map("users")
 }
 
 model Generation {
-  id             Int       @id @default(autoincrement())
-  userId         Int       @map("user_id")
-  type           String // 'image' | 'video'
-  modelId        String    @map("model_id")
-  modelName      String?   @map("model_name")
-  prompt         String?
-  paramsJson     String?   @map("params_json")
-  status         String // 'pending' | 'in_progress' | 'completed' | 'failed' | 'streaming'
-  jobId          String?   @map("job_id")
-  pollingUrl     String?   @map("polling_url")
-  assetPath      String?   @map("asset_path") // comma-separated filenames / storage keys
-  assetMediaType String?   @map("asset_media_type")
-  thumbnailPath  String?   @map("thumbnail_path")
-  cost           String? // numeric string USD
-  error          String?
-  durationMs     Int?      @map("duration_ms")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  userId           Int      @map("user_id")
+  type             String // 'image' | 'video'
+  modelId          String   @map("model_id")
+  modelName        String?  @map("model_name")
+  prompt           String?
+  paramsJson       String?  @map("params_json")
+  status           String // 'pending' | 'in_progress' | 'completed' | 'failed' | 'streaming'
+  jobId            String?  @map("job_id")
+  pollingUrl       String?  @map("polling_url")
+  assetPath        String?  @map("asset_path") // comma-separated filenames / storage keys
+  assetMediaType   String?  @map("asset_media_type")
+  thumbnailPath    String?  @map("thumbnail_path")
+  cost             String? // numeric string USD (provider-reported)
+  error            String?
+  durationMs       Int?     @map("duration_ms")
+  // Increment 1 additions: provider abstraction seam + credit metering + idempotency.
+  provider         String   @default("openrouter")
+  idempotencyKey   String?  @unique @map("idempotency_key")
+  estimatedCredits Int?     @map("estimated_credits")
+  reservedCredits  Int?     @map("reserved_credits")
+  finalCredits     Int?     @map("final_credits")
+  projectId        Int?     @map("project_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assets    Asset[]
+  runEvents RunEvent[]
 
   @@index([userId, createdAt(sort: Desc)], name: "idx_generations_user")
+  @@index([projectId])
   @@map("generations")
 }
 
@@ -75,4 +91,96 @@ model ModelCache {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("model_cache")
+}
+
+// ============================================================
+// Increment 1 — projects, normalized assets, durable run events,
+// and an integer credit ledger. All scoped by userId (single-tenant).
+// ============================================================
+
+model Project {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  name      String
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generations Generation[]
+  assets      Asset[]
+
+  @@index([userId, createdAt(sort: Desc)], name: "idx_projects_user")
+  @@map("projects")
+}
+
+model Asset {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  generationId Int?     @map("generation_id")
+  projectId    Int?     @map("project_id")
+  kind         String // 'image' | 'video' | 'audio'
+  storageKey   String   @map("storage_key") // R2 object key
+  mediaType    String   @map("media_type")
+  name         String?
+  sizeBytes    Int?     @map("size_bytes")
+  width        Int?
+  height       Int?
+  durationMs   Int?     @map("duration_ms")
+  favorite     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generation Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)], name: "idx_assets_user")
+  @@index([projectId])
+  @@index([generationId])
+  @@map("assets")
+}
+
+model RunEvent {
+  id           Int      @id @default(autoincrement())
+  generationId Int      @map("generation_id")
+  userId       Int      @map("user_id")
+  seq          Int // monotonic per generation; SSE Last-Event-ID
+  type         String // generation.created | .queued | .started | .provider_submitted | .processing | .downloading | .uploading | .completed | .failed | .cancelled
+  dataJson     String?  @map("data_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, seq], name: "uq_run_events_gen_seq")
+  @@index([generationId, seq])
+  @@map("run_events")
+}
+
+model CreditWallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique @map("user_id")
+  balance   Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("credit_wallets")
+}
+
+model CreditLedger {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  kind           String // 'signup' | 'reserve' | 'settle' | 'refund' | 'adjust'
+  amount         Int // signed integer credits (reserve is negative, refund positive)
+  balanceAfter   Int      @map("balance_after")
+  generationId   Int?     @map("generation_id")
+  reason         String?
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)], name: "idx_credit_ledger_user")
+  @@map("credit_ledger")
 }

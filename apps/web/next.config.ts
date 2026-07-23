@@ -29,7 +29,7 @@ const nextConfig: NextConfig = {
   // Trace from the monorepo root so the standalone bundle includes workspace packages.
   outputFileTracingRoot: path.join(process.cwd(), '..', '..'),
   // Transpile shared TS workspace packages directly from source (no build step).
-  transpilePackages: ['@orms/openrouter', '@orms/db'],
+  transpilePackages: ['@orms/openrouter', '@orms/db', '@orms/model-router'],
   // Keep Prisma external so its native engine is loaded at runtime, not bundled.
   serverExternalPackages: ['@prisma/client', 'prisma'],
   eslint: {
