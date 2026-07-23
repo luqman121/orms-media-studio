@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "skill": {
+      "*": "allow",
+      "experimental-*": "ask"
+    },
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git status *": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git branch*": "allow",
+      "git show*": "allow",
+      "git fetch*": "allow",
+      "git remote*": "allow",
+      "npm run*": "allow",
+      "npm test*": "allow",
+      "npx prisma validate*": "allow",
+      "npx prisma validate *": "allow",
+      "npx prisma generate*": "allow",
+      "npx prisma generate *": "allow",
+      "npx tsx scripts/backfill-increment1.ts*": "ask",
+      "docker compose config*": "allow",
+      "docker compose ps*": "allow",
+      "docker compose logs*": "allow",
+      "git push*": "ask",
+      "git merge*": "ask",
+      "git rebase*": "ask",
+      "git reset*": "ask",
+      "git commit*": "ask",
+      "git add*": "ask",
+      "git checkout*": "ask",
+      "docker compose down -v*": "deny",
+      "docker compose down -v *": "deny",
+      "*migrate reset*": "deny",
+      "prisma migrate reset*": "deny",
+      "npx prisma migrate reset*": "deny",
+      "*DROP DATABASE*": "deny"
+    },
+    "external_directory": "ask"
+  }
+}
