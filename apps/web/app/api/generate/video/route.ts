@@ -273,11 +273,13 @@ export async function POST(req: Request) {
         type: 'failed',
         dataJson: JSON.stringify({ error: (e as Error)?.message ?? 'unknown' }),
       }).catch(() => {});
+      // Persist a stable code (NOT the raw internal/stack message) to Generation.error
+      // to avoid leaking SDK/provider internals on the read path.
       await prisma.generation
-        .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
+        .update({ where: { id: recordId }, data: { status: 'failed', error: 'generation_failed_uncaught' } })
         .catch(() => {});
       const t = await getTranslations('errors');
-      return json({ id: recordId, error: t('generate.videoFailed'), detail: (e as Error).message }, 502);
+      return json({ id: recordId, error: t('generate.videoFailed') }, 502);
     }
     return handleError(e);
   }

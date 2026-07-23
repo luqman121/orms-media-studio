@@ -96,28 +96,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // ---- SSE stream path: unchanged in this slice ----
-    // The durable lifecycle (capability validation, credit reservation, RunEvents) is
-    // wired for the non-stream path only here; a later slice upgrades the stream path
-    // to RunEvent-sourced durable SSE. Keeping the stream create identical to before.
-    if (wantStream) {
-      const record = await prisma.generation.create({
-        data: {
-          userId,
-          type: 'image',
-          modelId: fields.model,
-          modelName: fields.model,
-          prompt: fields.prompt,
-          paramsJson: JSON.stringify(params),
-          status: 'pending',
-        },
-        select: { id: true },
-      });
-      recordId = record.id;
-      return streamImage(recordId, params, t0);
-    }
-
-    // ---- Non-stream path: durable, server-authoritative lifecycle ----
+    // ---- Shared durable preamble: capability + ownership + estimate + reserve ----
+    // Both the SSE stream path and the non-stream path run through this so the credit
+    // lifecycle (reserve → submit → settle/refund exactly once) is enforced uniformly.
+    // Previously the `stream=true` path bypassed reservation entirely (free generation
+    // vector); this preamble closes that gap (orms-security audit finding HIGH #1).
 
     // Ownership validation: if a projectId is referenced, it must belong to this user.
     // (projectId is reserved for Phase 4 Projects; validated defensively today.)
@@ -225,6 +208,16 @@ export async function POST(req: Request) {
       }
       throw e;
     }
+
+    // ---- Branch: SSE stream path vs non-stream synchronous path ----
+    if (wantStream) {
+      // Hand the reconcile context to streamImage so it can settle on the upstream
+      // `completed` frame and refund on `error`/upstream-failure — exactly once, keyed
+      // by the same `idempotencyKey` the reservation used.
+      return streamImage(recordId, params, t0, userId, reservedCredits, idempotencyKey);
+    }
+
+    // ---- Non-stream path: synchronous provider submit → settle/refund ----
 
     // Submit to the provider through the EXISTING path (signature/behavior unchanged).
     let result;
@@ -338,8 +331,9 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     // Outer catch: handles failures that escaped the typed branches above (e.g. R2
-    // upload, asset write, or settle). If we reserved credits but never reconciled,
-    // refund exactly once and persist a failure RunEvent.
+    // upload, asset write, or settle — non-stream path only; the stream path reconciles
+    // inside its own closures). If we reserved credits but never reconciled, refund
+    // exactly once and persist a failure RunEvent. Never leak raw internal/stack text.
     if (recordId != null && userId != null) {
       if (reservedCredits > 0 && !creditsReconciled) {
         await refundCredits(userId, {
@@ -353,25 +347,74 @@ export async function POST(req: Request) {
         generationId: recordId,
         userId,
         type: 'failed',
-        dataJson: JSON.stringify({ error: (e as Error)?.message ?? 'unknown' }),
+        dataJson: JSON.stringify({ reason: 'uncaught' }),
       }).catch(() => {});
+      // Persist a stable code (NOT the raw internal/stack message) to Generation.error
+      // to avoid leaking SDK/provider internals on the read path.
       await prisma.generation
-        .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
+        .update({ where: { id: recordId }, data: { status: 'failed', error: 'generation_failed_uncaught' } })
         .catch(() => {});
       const t = await getTranslations('errors');
-      return json({ id: recordId, error: t('generate.imageFailed'), detail: (e as Error).message }, 502);
+      return json({ id: recordId, error: t('generate.imageFailed') }, 502);
     }
     return handleError(e);
   }
 }
 
-// SSE streaming — proxies OpenRouter's image stream and persists the final image to R2.
-function streamImage(recordId: number, params: Record<string, unknown>, t0: number): Response {
+// SSE streaming — proxies OpenRouter's image stream, persists the final image to R2,
+// and reconciles credits (settle on completed, refund on error/upstream-failure) so the
+// stream path can no longer generate media without paying for it. Settlement/refund are
+// keyed by the same `idempotencyKey` the reservation used; the unique constraint on
+// `CreditLedger.idempotencyKey` makes them exactly-once even if a frame repeats.
+function streamImage(
+  recordId: number,
+  params: Record<string, unknown>,
+  t0: number,
+  userId: number,
+  reservedCredits: number,
+  idempotencyKey: string,
+): Response {
   const enc = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // Reconcile flag lives in this stream closure. The idempotency-key constraint
+      // also guards duplicates, but the flag avoids redundant provider error writes.
+      let reconciled = false;
+      // Refund once on any failure path (upstream !ok, error frame, exception). The
+      // idempotency key (`refund:{idempotencyKey}`) makes it safe to call repeatedly.
+      const refundOnce = async (reason: string) => {
+        if (reconciled) return;
+        await refundCredits(userId, {
+          generationId: recordId,
+          amount: reservedCredits,
+          idempotencyKey,
+          reason,
+        }).catch(() => {});
+        reconciled = true;
+      };
+      // Persist failure then send a non-leaking error frame. The provider error is
+      // logged server-side only; the streamed `message` is the stable code, not the
+      // raw provider/SDK text.
+      const failStream = async (reason: string) => {
+        await prisma.generation
+          .update({ where: { id: recordId }, data: { status: 'failed', error: reason } })
+          .catch(() => {});
+        await appendRunEvent({
+          generationId: recordId,
+          userId,
+          type: 'failed',
+          dataJson: JSON.stringify({ reason }),
+        }).catch(() => {});
+        await refundOnce(reason);
+        try {
+          send({ type: 'error', error: { code: 'generation_failed' } });
+        } catch {
+          /* controller may be closed */
+        }
+      };
+
       try {
         const upstream = await fetch(`${orouter.BASE}/images`, {
           method: 'POST',
@@ -379,9 +422,11 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
           body: JSON.stringify({ ...params, stream: true }),
         });
         if (!upstream.ok || !upstream.body) {
-          const t = await upstream.text();
-          await prisma.generation.update({ where: { id: recordId }, data: { status: 'failed', error: t } }).catch(() => {});
-          send({ type: 'error', error: { message: t } });
+          // Upstream rejected the request before streaming — log server-side, refund,
+          // persist a stable failure code (NOT the raw upstream body, which may contain
+          // provider-internal detail).
+          console.error('[stream-image] upstream non-ok', upstream.status);
+          await failStream('upstream_rejected');
           controller.close();
           return;
         }
@@ -417,12 +462,40 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
                   where: { id: recordId },
                   data: { status: 'completed', assetPath: fname, assetMediaType: mediaType, cost, durationMs: Date.now() - t0 },
                 });
+                // Normalize to an Asset row (consistent with the non-stream path).
+                await prisma.asset.create({
+                  data: {
+                    userId,
+                    generationId: recordId,
+                    kind: 'image',
+                    storageKey: fname,
+                    mediaType,
+                    name: fname,
+                  },
+                }).catch(() => {});
+                // Settle exactly once keyed by idempotencyKey. If final cost is
+                // available, reconcile against it; else treat the reservation as the
+                // real cost (no refund, no extra charge).
+                const finalCredits = usdToCredits(evt.usage?.cost) || reservedCredits;
+                await settleCredits(userId, {
+                  generationId: recordId,
+                  reservedCredits,
+                  finalCredits,
+                  idempotencyKey,
+                }).catch(() => {});
+                reconciled = true;
+                await appendRunEvent({
+                  generationId: recordId,
+                  userId,
+                  type: 'completed',
+                  dataJson: JSON.stringify({ assets: [{ filename: fname, media_type: mediaType }] }),
+                }).catch(() => {});
                 send({ type: 'completed', id: recordId, filename: fname, cost });
               } else if (evt.type === 'error') {
-                await prisma.generation
-                  .update({ where: { id: recordId }, data: { status: 'failed', error: JSON.stringify(evt.error) } })
-                  .catch(() => {});
-                send({ type: 'error', error: evt.error });
+                // Provider-reported error frame — log server-side, refund, persist
+                // stable code (NOT the raw evt.error JSON, which may contain internals).
+                console.error('[stream-image] provider error frame', JSON.stringify(evt.error));
+                await failStream('provider_error');
               } else {
                 send(evt);
               }
@@ -431,16 +504,16 @@ function streamImage(recordId: number, params: Record<string, unknown>, t0: numb
             }
           }
         }
+        // Stream ended without a `completed` frame and without an `error` frame.
+        // If we never reconciled, this is an aborted/empty run: refund once so credits
+        // are not silently reserved forever.
+        if (!reconciled) {
+          await failStream('stream_ended_without_terminal');
+        }
         controller.close();
       } catch (e) {
-        await prisma.generation
-          .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
-          .catch(() => {});
-        try {
-          send({ type: 'error', error: { message: (e as Error).message } });
-        } catch {
-          /* controller may be closed */
-        }
+        console.error('[stream-image] exception', (e as Error)?.message);
+        await failStream('stream_exception');
         controller.close();
       }
     },

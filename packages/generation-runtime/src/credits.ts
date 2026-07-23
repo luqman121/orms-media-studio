@@ -63,12 +63,25 @@ async function applyDelta(
     const existing = await tx.creditLedger.findUnique({ where: { idempotencyKey: opts.idempotencyKey } });
     if (existing) return existing.balanceAfter;
 
-    const wallet = await tx.creditWallet.upsert({
+    // Ensure the wallet row exists (no balance change).
+    await tx.creditWallet.upsert({
       where: { userId },
       create: { userId, balance: 0 },
       update: {},
     });
-    const next = wallet.balance + amount;
+
+    // Acquire a row-level lock for the duration of this transaction. Without this,
+    // two concurrent reserves with DISTINCT idempotency keys could both read the
+    // pre-reservation balance via the upsert above and both write an absolute
+    // balanceAfter — a lost update that silently overspends the wallet. SELECT …
+    // FOR UPDATE blocks the second writer until the first commits/rolls back,
+    // serializing balance mutations per user. (orms-credit-ledger invariant:
+    // concurrent requests cannot overspend; consider FOR UPDATE / serializable
+    // if a gap is found.) The column is `user_id` (snake_case via @map).
+    const locked = await tx.$queryRaw<{ balance: number }[]>`SELECT balance FROM credit_wallets WHERE user_id = ${userId} FOR UPDATE`;
+    const currentBalance = locked[0]?.balance ?? 0;
+
+    const next = currentBalance + amount;
     if (next < 0 && !opts.allowNegative) throw new InsufficientCreditsError();
     const balanceAfter = Math.max(0, next);
 

@@ -343,15 +343,73 @@ normalize error (model-router normalizeError → Arabic message)
 > A future slice should add an `error_code` column, have the worker write the stable `code`,
 > and have `serializeGeneration` translate at read time.
 
-> **Phase 3 runtime verification status — UNVERIFIED** (no browser/curl/DB run):
-> - Locale-aware API error responses (NEXT_LOCALE=en vs ar vs invalid vs absent).
-> - `<html lang dir>` flip on switcher click + persistence across refresh.
-> - `/api/locale` CSRF rejection at runtime.
-> - RTL/LTR visual rendering across 375/768/1024/1440, reduced-motion, focus rings.
-> - Mixed Arabic/English bidi rendering in a real browser.
-> These are deferred to the combined Phase 2b + Phase 3 quality gate (in progress) and
-> Phase 5 deterministic tests (Vitest/Playwright). Phase 3 is **NOT** claimed fully
-> quality-gated yet — only build + tsc + prisma validate + catalog parity pass.
+> **Phase 3 runtime verification status — PARTIALLY VERIFIED** (combined Phase 2b + Phase 3
+> quality gate run on a disposable local Postgres + Redis; no paid provider call).
+> **Runtime-verified (curl against `next start`):**
+> - Locale-aware API error responses: no cookie → Arabic; `NEXT_LOCALE=en` → English;
+>   `NEXT_LOCALE=fr` (invalid) → Arabic fallback. Same `code` returns in EN + AR for
+>   `generate.modelRequired`.
+> - `<html lang dir>` flips: no cookie → `lang="ar" dir="rtl"`; `en` → `lang="en" dir="ltr"`;
+>   `fr` → fallback `ar/rtl`. Cookie persists across a follow-up GET `/`.
+> - `/api/locale` validation + SameSite/HttpOnly cookie + same-origin CSRF guard: valid
+>   ar/en → 200 + cookie; invalid `fr` → 400 `invalid_locale`; cross-origin `evil.com` →
+>   403 `forbidden`; non-JSON body → 400 `invalid_body`.
+> - Unauthenticated SSE → 401; unauthenticated asset → 401; unauthenticated generation
+>   detail → 401.
+> - Cross-user SSE → 404 with no events streamed; cross-user asset → 404 (no existence
+>   leak); cross-user generation detail → 404.
+> - Owner asset → 307 to a 300s short-lived signed R2 URL carrying
+>   `Referrer-Policy: no-referrer`; path-traversal `..%2F..%2Fetc%2Fpasswd` → basename → 404.
+> - SSE replay: full → seqs 1-5 in order then close; `Last-Event-ID: 3` → seqs 4-5 only;
+>   `Last-Event-ID: 5` (past terminal) → empty + close.
+> - Positive-integer id guard on `/generations/[id]/poll` and `/generations/[id]`: `abc` →
+>   404 (not 500).
+> - Signup credit grant idempotency: duplicate `signup:{userId}` ledger insert blocked by
+>   the unique constraint (`credit_ledger_idempotency_key_key`).
+>
+> **Combined gate reviewed (orms-reviewer + orms-security + orms-tests + orms-frontend,
+> read-only) and findings remediated:**
+> - HIGH credit concurrency overspend → fixed by `SELECT … FOR UPDATE` row lock in
+>   `applyDelta` (`packages/generation-runtime/src/credits.ts`).
+> - HIGH `stream=true` image path credit bypass (free-generation vector) → fixed by
+>   hoisting the durable reserve→submit→settle/refund lifecycle above the `wantStream`
+>   branch and passing reconcile context into `streamImage` (settle on `completed`,
+>   refund on `error`/upstream-!ok/stream-without-terminal; stable codes persisted,
+>   no raw internal text to the client).
+> - Medium SSE initial-connect terminal race → fixed by re-draining in the initial
+>   terminal branch (mirrors the tail loop).
+> - Medium raw internal/provider error text leaked via `detail` → dropped from image +
+>   video outer catches; `/poll` provider-failure path now throws a `LocalizedError`
+>   (`generic.serverError`) instead of returning `(e).message`; `Generation.error` on
+>   uncaught paths now stores a stable code, not the raw SDK message.
+> - Medium `/generations/[id]/poll` missing positive-integer id guard → added.
+> - Medium `DashboardShell.tsx` physical directional classes breaking LTR (`border-l`,
+>   `right-0`, `text-right`) → converted to `border-e`, `start-0`, `text-end`.
+>
+> **STILL RUNTIME-UNVERIFIED — deferred to Phase 5 deterministic tests (no test runner
+> installed):**
+> - Concurrent overspend under true parallel `reserveCredits` against a real Postgres
+>   (the `FOR UPDATE` fix is type/build-verified + reads correctly, but the
+>   race window itself requires a Vitest + real-DB concurrency test, not a curl
+>   spot-check). The static guarantee is the row lock; the dynamic proof is Phase 5.
+> - Exactly-once settle/refund across simulated mid-flow crash/retry (recover-key vs
+>   settle-key distinctness — needs an integration test with a mocked OpenRouter).
+> - `stream=true` end-to-end settle/refund against a mocked streaming provider (needs the
+>   Phase 5 mocked OpenRouter seam; curl can't reproduce this without paid calls).
+> - LTR visual rendering at 375/768/1024/1440, reduced-motion, focus rings, mixed Arabic/
+>   English bidi rendering — needs Playwright e2e (Phase 5).
+> - Migration application on a clean DB: `prisma migrate deploy` failed because the
+>   pre-existing `0_init` migration has a UTF-8 BOM that Postgres rejects (`\uFEFF` syntax
+>   error at position 0). Per AGENTS.md (editing committed migrations is prohibited),
+>   the disposable DB was set up via `prisma db push` (schema syncs cleanly — proves the
+>   schema is valid on a fresh PG). Fixing the BOM in `0_init` is out of scope for this
+>   gate and remains a known blocker for `prisma migrate deploy`-based CI (Phase 5
+>   test-setup will need to either strip the BOM with a tiny migration-rename or use
+>   `prisma db push` in CI).
+>
+> **Phase 3 is still NOT claimed fully quality-gated** — runtime checks pass for the
+> surface exercised here, but the Phase 5 deterministic suite (Vitest + Playwright + CI)
+> is the authoritative gate per `orms-asset-security`'s definition of done.
 
 ### Phase 4 — Projects, Asset Library, and composer  ⏳
 

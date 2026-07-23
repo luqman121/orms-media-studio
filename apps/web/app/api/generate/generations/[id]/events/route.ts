@@ -147,6 +147,25 @@ export async function GET(req: Request, ctx: Ctx) {
           return;
         }
         if (TERMINAL_STATUSES.has(status.status)) {
+          // Initial-drain terminal: re-drain once more (the terminal RunEvent may have
+          // been committed between the initial findMany above and this status read), then
+          // close. Mirrors the tail loop's terminal-drain at lines 202–210 so a client
+          // connecting just as the generation flips to terminal still receives the final
+          // event (reviewer finding: SSE initial-connect terminal race).
+          try {
+            const tail = await prisma.runEvent.findMany({
+              where: { generationId, seq: { gt: lastSentSeq } },
+              orderBy: { seq: 'asc' },
+            });
+            for (const ev of tail) {
+              sendEvent(ev);
+              lastSentSeq = ev.seq;
+            }
+          } catch (e) {
+            console.error('[sse] initial terminal drain failed', (e as Error)?.message);
+            sendErrorAndClose(streamErrorMsg);
+            return;
+          }
           close();
           return;
         }

@@ -17,7 +17,13 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     const userId = requireAuth(req);
     const { id } = await ctx.params;
-    const row = await prisma.generation.findFirst({ where: { id: Number(id), userId } });
+    // Positive-integer guard (mirrors /generations/[id] GET+DELETE) so a non-numeric
+    // `id` resolves to a clean 404 instead of a 500 from Prisma.
+    const generationId = Number(id);
+    if (!Number.isInteger(generationId) || generationId <= 0) {
+      throw new LocalizedError({ code: 'generic.notFound', status: 404 });
+    }
+    const row = await prisma.generation.findFirst({ where: { id: generationId, userId } });
     if (!row) throw new LocalizedError({ code: 'generic.notFound', status: 404 });
     if (row.type !== 'video' || !row.jobId) throw new LocalizedError({ code: 'generate.notVideoJob', status: 400 });
     if (row.status === 'completed' || row.status === 'failed') return json({ status: row.status, id: row.id });
@@ -45,10 +51,10 @@ export async function POST(req: Request, ctx: Ctx) {
       });
       return json({ id: row.id, status });
     } catch (e) {
-      // Provider poll/download failure — surface the technical message (non-Arabic)
-      // as `detail`; the localized `error` bucket is generic server error.
-      console.error('[poll] provider failure', (e as Error).message);
-      return json({ error: (e as Error).message }, 502);
+      // Provider poll/download failure — log server-side only; return a non-leaking
+      // localized generic so raw provider/SDK detail never reaches the client.
+      console.error('[poll] provider failure', (e as Error)?.message);
+      throw new LocalizedError({ code: 'generic.serverError', status: 502 });
     }
   } catch (e) {
     return handleError(e);

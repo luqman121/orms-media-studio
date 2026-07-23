@@ -147,7 +147,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[linear-gradient(135deg,#2f6df6,#28d7ff)] text-sm font-bold text-white">
             {(user?.email?.[0] || 'U').toUpperCase()}
           </span>
-          <span dir="ltr" className="truncate text-right text-xs text-[var(--dz-text-2)]">
+          <span dir="ltr" className="truncate text-end text-xs text-[var(--dz-text-2)]">
             {user?.email}
           </span>
         </div>
@@ -164,7 +164,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <div className="dz flex min-h-screen">
       {/* Desktop sidebar — first child renders on the right in RTL */}
-      <aside className="sticky top-0 hidden h-screen w-[240px] shrink-0 flex-col border-l border-[var(--dz-border)] bg-[var(--dz-sidebar)] lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[240px] shrink-0 flex-col border-e border-[var(--dz-border)] bg-[var(--dz-sidebar)] lg:flex">
         {SidebarInner}
       </aside>
 
@@ -211,7 +211,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
         {open && (
           <>
             <div className="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} />
-            <aside className="fixed inset-y-0 right-0 z-50 flex w-[260px] flex-col border-l border-[var(--dz-border)] bg-[var(--dz-sidebar)] lg:hidden">
+            <aside className="fixed inset-y-0 start-0 z-50 flex w-[260px] flex-col border-e border-[var(--dz-border)] bg-[var(--dz-sidebar)] lg:hidden">
               <div className="flex items-center justify-end px-3 pt-3">
                 <button className="btn-ghost !p-2" onClick={() => setOpen(false)} aria-label={t_shell('closeMenu')}>
                   <X size={20} />
