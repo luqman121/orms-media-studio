@@ -1,29 +1,38 @@
 'use client';
 // Dashboard shell — premium navy media-studio layout (ref screen 1):
 // RTL sidebar (right) with logo + blue Create CTA + nav, breadcrumb top bar
-// with user chip, mobile drawer. Auth/logout/navigation behaviour unchanged.
+// with user chip + locale switcher, mobile drawer. Auth/logout/navigation
+// behaviour unchanged. All customer-facing strings come from next-intl catalogs
+// (`nav`, `shell`, `locale` namespaces); mixed-script English (emails) keeps
+// explicit `dir="ltr"` wrappers.
 import { useState, useEffect, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations, useLocale } from 'next-intl';
 import { Home, Wand2, Images, Settings, LogOut, Menu, X, Plus, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Logo from './ui/Logo';
+import { SUPPORTED_LOCALES, type Locale } from '../i18n/locale';
 
+// Nav items map routes → catalog keys (`nav.*`) + icons. Only the label is
+// localized; the route + icon mapping is structural.
 const navItems = [
-  { to: '/dashboard', label: 'الرئيسية', icon: Home },
-  { to: '/generate', label: 'المولّد', icon: Wand2 },
-  { to: '/history', label: 'المعرض', icon: Images },
-  { to: '/settings', label: 'الإعدادات', icon: Settings },
-];
+  { to: '/dashboard', key: 'dashboard', icon: Home },
+  { to: '/generate', key: 'generate', icon: Wand2 },
+  { to: '/history', key: 'history', icon: Images },
+  { to: '/settings', key: 'settings', icon: Settings },
+] as const;
 
-const crumbLabels: Record<string, string> = {
-  '/dashboard': 'الرئيسية',
-  '/generate': 'إنشاء',
-  '/history': 'المعرض',
-  '/settings': 'الإعدادات',
+// Breadcrumb segment → `shell.crumb_*` key.
+const crumbKeys: Record<string, string> = {
+  '/dashboard': 'crumb_dashboard',
+  '/generate': 'crumb_generate',
+  '/history': 'crumb_history',
+  '/settings': 'crumb_settings',
 };
 
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const t_nav = useTranslations('nav');
   return (
     <nav className="flex flex-1 flex-col gap-1 p-3">
       {navItems.map((it) => {
@@ -37,7 +46,7 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
             aria-current={active ? 'page' : undefined}
             className={`dz-nav-item ${active ? 'is-active' : ''}`}
           >
-            <Icon size={18} /> {it.label}
+            <Icon size={18} /> {t_nav(it.key)}
           </Link>
         );
       })}
@@ -45,10 +54,68 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
   );
 }
 
+// Compact segmented locale switcher (ar ↔ en). Persists via POST /api/locale
+// (sets the NEXT_LOCALE cookie), then `router.refresh()` re-renders the server
+// root layout so `<html lang dir>` flips. Token-driven styling (no stray hex),
+// inherits the global cyan `:focus-visible` ring (globals.css §16).
+function LocaleSwitcher() {
+  const t_locale = useTranslations('locale');
+  const current = useLocale() as Locale;
+  const router = useRouter();
+  const [pending, setPending] = useState<Locale | null>(null);
+
+  async function switchTo(next: Locale) {
+    if (next === current || pending) return;
+    setPending(next);
+    try {
+      const res = await fetch('/api/locale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale: next }),
+      });
+      if (!res.ok) throw new Error('locale set failed');
+      // Re-render server components (root layout re-reads the cookie → dir flip).
+      router.refresh();
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label={t_locale('switchTo')}
+      className="flex items-center rounded-[10px] border border-[var(--dz-border)] bg-[rgba(255,255,255,0.03)] p-0.5"
+    >
+      {SUPPORTED_LOCALES.map((loc) => {
+        const active = loc === current;
+        return (
+          <button
+            key={loc}
+            type="button"
+            onClick={() => switchTo(loc)}
+            disabled={active || pending !== null}
+            aria-pressed={active}
+            aria-label={t_locale('switchTo') + ' — ' + t_locale(loc)}
+            className={`min-w-[34px] rounded-[8px] px-2 py-1 text-xs font-semibold transition-colors disabled:cursor-default ${
+              active
+                ? 'bg-[var(--accent)] text-white'
+                : 'text-[var(--dz-text-2)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white'
+            }`}
+          >
+            {t_locale(loc)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function DashboardShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const t_shell = useTranslations('shell');
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -60,7 +127,8 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     router.push('/auth');
   }
 
-  const crumb = crumbLabels[pathname] || '';
+  const crumbKey = crumbKeys[pathname];
+  const crumb = crumbKey ? t_shell(crumbKey) : '';
 
   const SidebarInner = (
     <>
@@ -69,7 +137,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       </div>
       <div className="px-3 pb-2">
         <Link href="/generate" className="btn-primary w-full !min-h-[46px] text-sm">
-          <Plus size={17} /> إنشاء جديد
+          <Plus size={17} /> {t_shell('createNew')}
           <span className="shine" />
         </Link>
       </div>
@@ -87,7 +155,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           onClick={doLogout}
           className="flex w-full items-center gap-2.5 rounded-[12px] border border-[var(--dz-border)] bg-transparent px-3.5 py-2.5 text-sm font-semibold text-[#fda4af] transition-colors hover:bg-[rgba(255,91,110,0.08)]"
         >
-          <LogOut size={16} /> تسجيل الخروج
+          <LogOut size={16} /> {t_shell('logout')}
         </button>
       </div>
     </>
@@ -101,13 +169,13 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar: mobile menu + breadcrumb, user avatar at the end */}
+        {/* Top bar: mobile menu + breadcrumb, locale switcher + user avatar at the end */}
         <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between gap-3 border-b border-[var(--dz-border)] bg-[rgba(23,26,44,0.72)] px-4 backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2">
             <button
               className="btn-ghost !p-2 lg:hidden"
               onClick={() => setOpen((v) => !v)}
-              aria-label="القائمة"
+              aria-label={t_shell('openMenu')}
               aria-expanded={open}
             >
               {open ? <X size={22} /> : <Menu size={22} />}
@@ -118,7 +186,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             {/* Breadcrumb (ref screens 2–3) */}
             <div className="hidden min-w-0 items-center gap-1.5 text-sm sm:flex">
               <Link href="/dashboard" className="flex items-center gap-1.5 text-[var(--dz-text-3)] transition-colors hover:text-white">
-                <Home size={15} /> الرئيسية
+                <Home size={15} /> {t_shell('breadcrumbHome')}
               </Link>
               {crumb && pathname !== '/dashboard' && (
                 <>
@@ -129,6 +197,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2.5">
+            <LocaleSwitcher />
             <span dir="ltr" className="hidden max-w-[200px] truncate text-xs text-[var(--dz-text-2)] md:block">
               {user?.email}
             </span>
@@ -144,7 +213,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             <div className="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} />
             <aside className="fixed inset-y-0 right-0 z-50 flex w-[260px] flex-col border-l border-[var(--dz-border)] bg-[var(--dz-sidebar)] lg:hidden">
               <div className="flex items-center justify-end px-3 pt-3">
-                <button className="btn-ghost !p-2" onClick={() => setOpen(false)} aria-label="إغلاق">
+                <button className="btn-ghost !p-2" onClick={() => setOpen(false)} aria-label={t_shell('closeMenu')}>
                   <X size={20} />
                 </button>
               </div>

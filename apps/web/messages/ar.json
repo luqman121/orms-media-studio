@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "title": "OpenRouter Media Studio — استوديو الصور والفيديو",
+    "description": "مولّد الصور والفيديو بالذكاء الاصطناعي عبر OpenRouter",
+    "appleWebAppTitle": "استوديو الميديا"
+  },
+  "nav": {
+    "dashboard": "الرئيسية",
+    "generate": "المولّد",
+    "history": "المعرض",
+    "settings": "الإعدادات"
+  },
+  "shell": {
+    "createNew": "إنشاء جديد",
+    "logout": "تسجيل الخروج",
+    "openMenu": "القائمة",
+    "closeMenu": "إغلاق",
+    "breadcrumbHome": "الرئيسية",
+    "crumb_dashboard": "الرئيسية",
+    "crumb_generate": "إنشاء",
+    "crumb_history": "المعرض",
+    "crumb_settings": "الإعدادات"
+  },
+  "locale": {
+    "ar": "العربية",
+    "en": "English",
+    "switchTo": "تبديل اللغة"
+  }
+}

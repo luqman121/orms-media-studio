@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "title": "OpenRouter Media Studio — Image & Video Studio",
+    "description": "AI image and video generation via OpenRouter",
+    "appleWebAppTitle": "Media Studio"
+  },
+  "nav": {
+    "dashboard": "Home",
+    "generate": "Generate",
+    "history": "Gallery",
+    "settings": "Settings"
+  },
+  "shell": {
+    "createNew": "Create new",
+    "logout": "Log out",
+    "openMenu": "Menu",
+    "closeMenu": "Close",
+    "breadcrumbHome": "Home",
+    "crumb_dashboard": "Home",
+    "crumb_generate": "Create",
+    "crumb_history": "Gallery",
+    "crumb_settings": "Settings"
+  },
+  "locale": {
+    "ar": "العربية",
+    "en": "English",
+    "switchTo": "Switch language"
+  }
+}

@@ -2,6 +2,7 @@ import type { NextConfig } from 'next';
 import path from 'node:path';
 import fs from 'node:fs';
 import { withSentryConfig } from '@sentry/nextjs';
+import withNextIntl from './next-intl.config';
 
 // In a monorepo, Next.js runs from apps/web/ and only loads .env from that directory.
 // The shared .env lives two levels up at the repo root — load it here so DATABASE_URL
@@ -39,7 +40,14 @@ const nextConfig: NextConfig = {
 
 // Wrap with Sentry when configured; skip transparently in local dev.
 const hasSentry = Boolean(process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN);
-export default hasSentry
+
+// Wrap order: next-intl outermost, Sentry innermost. next-intl's plugin wraps
+// the Next.js config to register its webpack/turbo loader + RSC aliasing; it
+// must see the final user config. Sentry's `withSentryConfig` then wraps that
+// composed config to inject its own instrumentation. Both compose as plain
+// higher-order functions, so `withNextIntl(withSentryConfig(nextConfig, …))`
+// keeps each plugin operating on the already-composed config of the other.
+const wrappedWithSentry = hasSentry
   ? withSentryConfig(nextConfig, {
       telemetry: false,
       silent: true,
@@ -50,3 +58,5 @@ export default hasSentry
       sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
     })
   : nextConfig;
+
+export default withNextIntl(wrappedWithSentry);

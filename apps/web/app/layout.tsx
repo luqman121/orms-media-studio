@@ -3,21 +3,28 @@ import type { ReactNode } from 'react';
 import './globals.css';
 import { Providers } from './providers';
 import { SwRegister } from '@/components/SwRegister';
+import { getLocale, getMessages, getTranslations } from 'next-intl/server';
+import { dirForLocale, type Locale } from '../i18n/locale';
 
-export const metadata: Metadata = {
-  title: 'OpenRouter Media Studio — استوديو الصور والفيديو',
-  description: 'مولّد الصور والفيديو بالذكاء الاصطناعي عبر OpenRouter',
-  manifest: '/manifest.webmanifest',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'استوديو الميديا',
-  },
-  icons: {
-    icon: '/icons/icon.svg',
-    apple: '/icons/apple-touch-icon.png',
-  },
-};
+// Localized metadata is generated per request from the `metadata` catalog
+// (next-intl `getTranslations`). The static `viewport` stays unchanged.
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('metadata');
+  return {
+    title: t('title'),
+    description: t('description'),
+    manifest: '/manifest.webmanifest',
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'black-translucent',
+      title: t('appleWebAppTitle'),
+    },
+    icons: {
+      icon: '/icons/icon.svg',
+      apple: '/icons/apple-touch-icon.png',
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -26,9 +33,19 @@ export const viewport: Viewport = {
   themeColor: '#864FF2',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Resolve the locale from the `NEXT_LOCALE` cookie (Arabic default) so the
+  // `<html lang dir>` attributes are dynamic and flip with the user's choice.
+  // `getLocale()` reads the same request config (`i18n/request.ts`) used by
+  // `getTranslations`, so metadata + `<html>` stay in sync.
+  const locale = (await getLocale()) as Locale;
+  const dir = dirForLocale(locale);
+  // Pass the full message bundle to the client provider so client components
+  // (e.g. DashboardShell, locale switcher) can use `useTranslations`.
+  const messages = await getMessages();
+
   return (
-    <html lang="ar" dir="rtl">
+    <html lang={locale} dir={dir}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -39,7 +56,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <SwRegister />
-        <Providers>{children}</Providers>
+        <Providers locale={locale} messages={messages}>
+          {children}
+        </Providers>
       </body>
     </html>
   );
