@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { User, Mail, Calendar, LogOut, Image as ImageIcon, Video as VideoIcon, Coins, Crown } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -31,6 +32,7 @@ function Row({ icon, label, value }: { icon: React.ReactNode; label: string; val
 }
 
 export default function SettingsPage() {
+  const t = useTranslations('settings');
   const { user, logout } = useAuth();
   const router = useRouter();
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -54,8 +56,8 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-[840px]">
       <div className="mb-6">
-        <h1 className="font-display text-[1.7rem] font-extrabold text-text-100">الإعدادات</h1>
-        <p className="mt-1 text-sm text-text-400">إدارة حسابك ومتابعة استهلاكك.</p>
+        <h1 className="font-display text-[1.7rem] font-extrabold text-text-100">{t('title')}</h1>
+        <p className="mt-1 text-sm text-text-400">{t('subtitle')}</p>
       </div>
 
       <div className="grid gap-5 md:grid-cols-2">
@@ -66,21 +68,21 @@ export default function SettingsPage() {
               {(user?.email?.[0] || 'U').toUpperCase()}
             </span>
             <div>
-              <div className="font-bold text-text-100">{user?.name || 'مستخدم ORMS'}</div>
-              <Badge tone="cyan" className="mt-1">حساب نشط</Badge>
+              <div className="font-bold text-text-100">{user?.name || t('defaultName')}</div>
+              <Badge tone="cyan" className="mt-1">{t('activeAccount')}</Badge>
             </div>
           </div>
-          <Row icon={<User size={16} />} label="الاسم" value={user?.name || '—'} />
-          <Row icon={<Mail size={16} />} label="البريد الإلكتروني" value={user?.email || '—'} />
-          <Row icon={<Calendar size={16} />} label="تاريخ الانضمام" value={created} />
+          <Row icon={<User size={16} />} label={t('name')} value={user?.name || '—'} />
+          <Row icon={<Mail size={16} />} label={t('email')} value={user?.email || '—'} />
+          <Row icon={<Calendar size={16} />} label={t('joined')} value={created} />
           <Button variant="danger" fullWidth className="mt-5" onClick={doLogout} leftIcon={<LogOut size={16} />}>
-            تسجيل الخروج
+            {t('logout')}
           </Button>
         </Card>
 
         {/* Usage */}
         <Card className="p-6">
-          <h2 className="mb-4 font-bold text-text-100">ملخص الاستهلاك</h2>
+          <h2 className="mb-4 font-bold text-text-100">{t('usageTitle')}</h2>
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -91,22 +93,22 @@ export default function SettingsPage() {
             <>
               <Row
                 icon={<ImageIcon size={16} className="text-blue-500" />}
-                label="الصور"
+                label={t('images')}
                 value={String(usage?.by_type?.image?.count ?? 0)}
               />
               <Row
                 icon={<VideoIcon size={16} className="text-cyan-500" />}
-                label="الفيديوهات"
+                label={t('videos')}
                 value={String(usage?.by_type?.video?.count ?? 0)}
               />
               <Row
                 icon={<Coins size={16} className="text-warning-500" />}
-                label="إجمالي التكلفة"
+                label={t('totalCost')}
                 value={`$${(usage?.total_cost_usd ?? 0).toFixed(4)}`}
               />
               <Row
                 icon={<Crown size={16} className="text-primary-400" />}
-                label="عمليات مكتملة"
+                label={t('completedOps')}
                 value={`${usage?.total_completed ?? 0} / ${usage?.total_generations ?? 0}`}
               />
             </>
@@ -119,11 +121,11 @@ export default function SettingsPage() {
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-grid opacity-40" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="font-display text-lg font-extrabold text-text-100">ارتقِ إلى باقة أعلى</h2>
-            <p className="mt-1 text-sm text-text-400">رصيد أكبر، نماذج Pro، وأولوية في التوليد.</p>
+            <h2 className="font-display text-lg font-extrabold text-text-100">{t('upgradeTitle')}</h2>
+            <p className="mt-1 text-sm text-text-400">{t('upgradeDesc')}</p>
           </div>
           <Link href="/#pricing" className="btn-primary text-sm">
-            <Crown size={16} /> عرض الباقات
+            <Crown size={16} /> {t('viewPlans')}
             <span className="shine" />
           </Link>
         </div>

@@ -4,6 +4,7 @@
 // ALL generation logic (model loading, image sync/streaming, async video poll,
 // prompt enhancer, params) is unchanged and calls the exact same API contracts.
 import { useState, useRef, useEffect, useCallback, type ChangeEvent } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   Image as ImageIcon,
   Video as VideoIcon,
@@ -49,23 +50,26 @@ interface ResultState {
 
 // Style/colour presets (ref screen 3 chips). Selected presets are appended to
 // the prompt text at submit time only — the generation pipeline is untouched.
+// Labels are localized via the `generate.stylePreset.*` / `generate.colorPreset.*`
+// catalog keys; `kw` (English keywords appended to the prompt) and `hex` are
+// structural and stay literal.
 const STYLE_PRESETS = [
-  { label: 'سينمائي', kw: 'cinematic style, dramatic lighting' },
-  { label: 'واقعي', kw: 'photorealistic, ultra detailed' },
-  { label: 'تجريدي', kw: 'abstract art style' },
-  { label: 'خيال علمي', kw: 'sci-fi futuristic style' },
-  { label: 'طبيعة', kw: 'lush nature scenery' },
-  { label: 'إعلان منتج', kw: 'premium commercial product shot' },
-];
+  { key: 'cinematic', kw: 'cinematic style, dramatic lighting' },
+  { key: 'photorealistic', kw: 'photorealistic, ultra detailed' },
+  { key: 'abstract', kw: 'abstract art style' },
+  { key: 'scifi', kw: 'sci-fi futuristic style' },
+  { key: 'nature', kw: 'lush nature scenery' },
+  { key: 'product', kw: 'premium commercial product shot' },
+] as const;
 const COLOR_PRESETS = [
-  { label: 'أزرق', hex: '#2f6df6', kw: 'blue tones' },
-  { label: 'أحمر', hex: '#ff5b6e', kw: 'red tones' },
-  { label: 'برتقالي', hex: '#ff9a3d', kw: 'orange tones' },
-  { label: 'وردي', hex: '#ff9ad5', kw: 'pink tones' },
-  { label: 'أصفر', hex: '#ffd166', kw: 'golden yellow tones' },
-  { label: 'سماوي', hex: '#28d7ff', kw: 'cyan teal tones' },
-  { label: 'أحادي', hex: '#cbd5e1', kw: 'black and white monochrome' },
-];
+  { key: 'blue', hex: '#2f6df6', kw: 'blue tones' },
+  { key: 'red', hex: '#ff5b6e', kw: 'red tones' },
+  { key: 'orange', hex: '#ff9a3d', kw: 'orange tones' },
+  { key: 'pink', hex: '#ff9ad5', kw: 'pink tones' },
+  { key: 'yellow', hex: '#ffd166', kw: 'golden yellow tones' },
+  { key: 'cyan', hex: '#28d7ff', kw: 'cyan teal tones' },
+  { key: 'mono', hex: '#cbd5e1', kw: 'black and white monochrome' },
+] as const;
 
 function downloadAsset(url: string, name: string) {
   const a = document.createElement('a');
@@ -77,6 +81,7 @@ function downloadAsset(url: string, name: string) {
 }
 
 export default function GeneratePage() {
+  const t = useTranslations('generate');
   const [mode, setMode] = useState<'image' | 'video'>('image');
   const [models, setModels] = useState<{ images: Model[]; videos: Model[] }>({ images: [], videos: [] });
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -128,7 +133,7 @@ export default function GeneratePage() {
       if (mode === 'image' && imgs.length && !selectedModelId) setSelectedModelId(imgs[0].id);
       else if (mode === 'video' && vids.length && !selectedModelId) setSelectedModelId(vids[0].id);
     } catch (e) {
-      setModelsError((e as Error).message || 'فشل جلب النماذج');
+      setModelsError((e as Error).message || t('errModels'));
     } finally {
       setModelsLoading(false);
     }
@@ -190,13 +195,13 @@ export default function GeneratePage() {
     } catch (e) {
       const err = e as ApiError;
       const detail = (err.data as { detail?: string } | undefined)?.detail;
-      const base = err.message || 'فشل تحسين البرومبت';
+      const base = err.message || t('errEnhance');
       throw new Error(detail && detail !== base ? `${base} — ${detail}` : base);
     }
   }
 
   async function handleEnhanceClick() {
-    if (!prompt.trim()) return setError('اكتب برومبتاً أولاً ليتم تحسينه');
+    if (!prompt.trim()) return setError(t('errNeedPromptEnhance'));
     setEnhancing(true);
     setError('');
     try {
@@ -227,7 +232,7 @@ export default function GeneratePage() {
   }
 
   async function runImage() {
-    if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
+    if (!prompt || !selectedModelId) return setError(t('errNeedPromptModel'));
     setError('');
     let finalPrompt = composePrompt();
     if (autoEnhance) {
@@ -296,10 +301,10 @@ export default function GeneratePage() {
                   setResult({ status: 'completed', assets: [...collected], cost: evt.cost, id: evt.id, at: Date.now() });
                 }
               } else if (evt.type === 'error') {
-                throw new Error(evt.error?.message || 'خطأ في السحب المباشر');
+                throw new Error(evt.error?.message || t('errStream'));
               }
             } catch (e) {
-              if ((e as Error).message.includes('خطأ')) throw e;
+              if ((e as Error).message.includes(t('errStream'))) throw e;
             }
           }
         }
@@ -314,7 +319,7 @@ export default function GeneratePage() {
     } catch (e) {
       const err = e as ApiError;
       const detail = (err.data as { detail?: string } | undefined)?.detail;
-      const base = err.message || 'فشل توليد الصورة';
+      const base = err.message || t('errImageFailed');
       setError(detail && detail !== base ? `${base} — ${detail}` : base);
     } finally {
       setRunning(false);
@@ -323,7 +328,7 @@ export default function GeneratePage() {
   }
 
   async function runVideo() {
-    if (!prompt || !selectedModelId) return setError('البرومبت والنموذج مطلوبان');
+    if (!prompt || !selectedModelId) return setError(t('errNeedPromptModel'));
     setError('');
     let finalPrompt = composePrompt();
     if (autoEnhance) {
@@ -341,7 +346,7 @@ export default function GeneratePage() {
     }
     setRunning(true);
     setResult(null);
-    setPollingText('إرسال الطلب...');
+    setPollingText(t('pollSending'));
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     const fd = new FormData();
     if (referenceImage) fd.append('image', referenceImage);
@@ -353,7 +358,7 @@ export default function GeneratePage() {
 
     try {
       const r = await api.post<{ id: number }>('/api/generate/video', fd);
-      setPollingText('في قائمة الانتظار...');
+      setPollingText(t('pollQueued'));
       const genId = r.id;
       pollTimerRef.current = setInterval(async () => {
         try {
@@ -377,11 +382,11 @@ export default function GeneratePage() {
             } catch {
               /* fall back to generic message */
             }
-            setError(reason ? `فشل توليد الفيديو — ${reason}` : 'فشل توليد الفيديو');
+            setError(reason ? t('errVideoFailedReason', { reason }) : t('errVideoFailed'));
             setPollingText('');
             setRunning(false);
           } else {
-            setPollingText(p.status === 'in_progress' ? 'النموذج يولّد الفيديو...' : 'في الانتظار...');
+            setPollingText(p.status === 'in_progress' ? t('pollInProgress') : t('pollPending'));
           }
         } catch {
           // ignore network blips, keep polling
@@ -390,7 +395,7 @@ export default function GeneratePage() {
     } catch (e) {
       const err = e as ApiError;
       const detail = (err.data as { detail?: string } | undefined)?.detail;
-      const base = err.message || 'فشل إرسال طلب الفيديو';
+      const base = err.message || t('errVideoSend');
       setError(detail && detail !== base ? `${base} — ${detail}` : base);
       setRunning(false);
       setPollingText('');
@@ -425,20 +430,20 @@ export default function GeneratePage() {
   const PropertiesForm = (
     <>
       <Tabs
-        ariaLabel="نوع التوليد"
+        ariaLabel={t('modeLabel')}
         className="mb-4"
         value={mode}
         onChange={setMode}
         disabled={busy}
         items={[
-          { value: 'image', label: 'صورة', icon: <ImageIcon size={16} /> },
-          { value: 'video', label: 'فيديو', icon: <VideoIcon size={16} /> },
+          { value: 'image', label: t('modeImage'), icon: <ImageIcon size={16} /> },
+          { value: 'video', label: t('modeVideo'), icon: <VideoIcon size={16} /> },
         ]}
       />
 
       {/* Model */}
       <div className="mb-4">
-        <Field label="النموذج" htmlFor="model-select" hint={currentModel ? <span dir="ltr">{currentModel.id}</span> : undefined}>
+        <Field label={t('modelLabel')} htmlFor="model-select" hint={currentModel ? <span dir="ltr">{currentModel.id}</span> : undefined}>
           {modelsLoading ? (
             <Skeleton className="h-[50px]" />
           ) : modelsError ? (
@@ -460,7 +465,7 @@ export default function GeneratePage() {
       {/* Prompt */}
       <div className="mb-3">
         <div className="mb-1.5 flex items-center justify-between gap-2">
-          <label className="lbl !mb-0" htmlFor="prompt">البرومبت</label>
+          <label className="lbl !mb-0" htmlFor="prompt">{t('promptLabel')}</label>
           <div className="flex items-center gap-2">
             {previousPrompt !== null && (
               <button
@@ -469,7 +474,7 @@ export default function GeneratePage() {
                 disabled={busy}
                 className="flex items-center gap-1 text-xs text-[var(--dz-text-3)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Undo2 size={12} /> تراجع
+                <Undo2 size={12} /> {t('undo')}
               </button>
             )}
             <button
@@ -483,7 +488,7 @@ export default function GeneratePage() {
               ) : (
                 <Wand2 size={13} />
               )}
-              تحسين بالذكاء الاصطناعي
+              {t('enhance')}
             </button>
           </div>
         </div>
@@ -493,10 +498,10 @@ export default function GeneratePage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           disabled={busy}
-          placeholder={mode === 'image' ? 'اكتب وصف الصورة التي تريد إنشاءها...' : 'اكتب مشهد الفيديو، الحركة، الإضاءة، والأسلوب...'}
+          placeholder={mode === 'image' ? t('promptPlaceholderImage') : t('promptPlaceholderVideo')}
         />
         <p className="mt-1.5 text-xs text-[var(--dz-text-3)]">
-          اكتب فكرة بسيطة، وسيقوم الذكاء الاصطناعي بتحويلها إلى برومبت احترافي للتوليد.
+          {t('promptHint')}
         </p>
       </div>
 
@@ -504,14 +509,14 @@ export default function GeneratePage() {
       <label className="mb-4 flex cursor-pointer items-center gap-2.5 rounded-[12px] border border-[rgba(47,109,246,0.25)] bg-[rgba(47,109,246,0.08)] px-3.5 py-2.5">
         <input type="checkbox" checked={autoEnhance} onChange={(e) => setAutoEnhance(e.target.checked)} disabled={busy} className="accent-[#2f6df6]" />
         <span className="text-sm text-[#dbe0ef]">
-          <Wand2 size={14} className="ml-1.5 inline text-[var(--dz-blue-hover)]" />
-          دع الذكاء الاصطناعي يحسّن برومبتي قبل التوليد
+          <Wand2 size={14} className="ms-1.5 inline text-[var(--dz-blue-hover)]" />
+          {t('autoEnhance')}
         </span>
       </label>
 
       {/* Style chips (ref screen 3 genres) */}
       <div className="mb-4">
-        <label className="lbl">الأسلوب البصري</label>
+        <label className="lbl">{t('styleLabel')}</label>
         <div className="flex flex-wrap gap-2">
           {STYLE_PRESETS.map((s) => (
             <button
@@ -521,7 +526,7 @@ export default function GeneratePage() {
               className={`dz-chip ${styles.includes(s.kw) ? 'is-active' : ''}`}
               onClick={() => setStyles((cur) => toggleIn(cur, s.kw))}
             >
-              {s.label}
+              {t(`stylePreset.${s.key}`)}
             </button>
           ))}
         </div>
@@ -530,7 +535,7 @@ export default function GeneratePage() {
       {/* Params */}
       <div className="param-grid mb-4">
         {mode === 'image' && supportedKeys.includes('n') && (
-          <Field label="عدد الصور">
+          <Field label={t('countLabel')}>
             <Select value={n} onChange={(e) => setN(Number(e.target.value))} disabled={busy}>
               {[1, 2, 3, 4].map((x) => (
                 <option key={x} value={x}>{x}</option>
@@ -539,32 +544,32 @@ export default function GeneratePage() {
           </Field>
         )}
         {mode === 'video' && (
-          <Field label="المدة (ثانية)">
-            <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} placeholder="تلقائي" />
+          <Field label={t('durationLabel')}>
+            <input className="field" type="number" min={1} max={20} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} placeholder={t('auto')} />
           </Field>
         )}
         {(mode === 'image' && supportedKeys.includes('resolution')) || mode === 'video' ? (
-          <Field label="الدقة">
+          <Field label={t('resolutionLabel')}>
             <Select value={resolution} onChange={(e) => setResolution(e.target.value)} disabled={busy}>
-              <option value="">تلقائي</option>
+              <option value="">{t('auto')}</option>
               {(mode === 'video' ? videoResolutionLabels : imageResolutions).map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </Select>
           </Field>
         ) : null}
-        <Field label="نسبة الأبعاد">
+        <Field label={t('aspectLabel')}>
           <Select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={busy}>
-            <option value="">تلقائي</option>
+            <option value="">{t('auto')}</option>
             {ratioOptions.map((r) => (
               <option key={r} value={r}>{r}</option>
             ))}
           </Select>
         </Field>
         {mode === 'image' && supportedKeys.includes('quality') && (
-          <Field label="الجودة">
+          <Field label={t('qualityLabel')}>
             <Select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={busy}>
-              <option value="">تلقائي</option>
+              <option value="">{t('auto')}</option>
               {['low', 'medium', 'high', 'auto'].map((q) => (
                 <option key={q} value={q}>{q}</option>
               ))}
@@ -572,9 +577,9 @@ export default function GeneratePage() {
           </Field>
         )}
         {mode === 'image' && supportedKeys.includes('output_format') && (
-          <Field label="الصيغة">
+          <Field label={t('formatLabel')}>
             <Select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} disabled={busy}>
-              <option value="">تلقائي (PNG)</option>
+              <option value="">{t('autoPng')}</option>
               <option value="png">PNG</option>
               <option value="jpeg">JPEG</option>
               <option value="webp">WebP</option>
@@ -585,17 +590,18 @@ export default function GeneratePage() {
 
       {/* Colour palette (ref screen 3) */}
       <div className="mb-4">
-        <label className="lbl">الألوان المهيمنة (اختياري)</label>
+        <label className="lbl">{t('colorsLabel')}</label>
         <div className="flex flex-wrap items-center gap-2">
           {COLOR_PRESETS.map((c) => {
             const active = colors.includes(c.kw);
+            const label = t(`colorPreset.${c.key}`);
             return (
               <button
                 key={c.kw}
                 type="button"
                 disabled={busy}
-                title={c.label}
-                aria-label={c.label}
+                title={label}
+                aria-label={label}
                 aria-pressed={active}
                 onClick={() => setColors((cur) => toggleIn(cur, c.kw))}
                 className={`grid h-8 w-8 place-items-center rounded-full border-2 transition-transform disabled:opacity-50 ${
@@ -608,7 +614,7 @@ export default function GeneratePage() {
             );
           })}
           {colors.length > 0 && (
-            <button type="button" onClick={() => setColors([])} disabled={busy} className="dz-chip !px-2.5" aria-label="مسح الألوان">
+            <button type="button" onClick={() => setColors([])} disabled={busy} className="dz-chip !px-2.5" aria-label={t('clearColors')}>
               <X size={13} />
             </button>
           )}
@@ -617,7 +623,7 @@ export default function GeneratePage() {
 
       {/* Reference image */}
       <div className="mb-4">
-        <label className="lbl">صورة مرجعية (اختياري) — {mode === 'image' ? 'img2img' : 'image-to-video'}</label>
+        <label className="lbl">{t('referenceImageLabel', { mode: mode === 'image' ? t('refModeImage') : t('refModeVideo') })}</label>
         {!referenceImage ? (
           <>
             <input ref={filePRef} type="file" accept="image/*" onChange={onFileSelected} className="hidden" />
@@ -627,19 +633,19 @@ export default function GeneratePage() {
               className="flex w-full flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[rgba(47,109,246,0.45)] bg-[rgba(47,109,246,0.06)] px-4 py-6 text-sm text-[var(--dz-text-2)] transition-colors hover:bg-[rgba(47,109,246,0.12)] disabled:opacity-50"
             >
               <Upload size={20} className="text-[var(--dz-blue-hover)]" />
-              <span>اسحب صورة أو <span className="font-bold text-[var(--dz-blue-hover)]">تصفّح</span></span>
-              <span className="text-[0.7rem] text-[var(--dz-text-3)]">كل صيغ الصور مدعومة</span>
+              <span>{t('dropOrBrowse')} <span className="font-bold text-[var(--dz-blue-hover)]">{t('browse')}</span></span>
+              <span className="text-[0.7rem] text-[var(--dz-text-3)]">{t('refFormats')}</span>
             </button>
           </>
         ) : (
           <div className="relative overflow-hidden rounded-[14px] border border-[var(--dz-border)]">
-            <img src={refPreview} alt="مرجع" className="block max-h-52 w-full object-cover" />
+            <img src={refPreview} alt={t('refAlt')} className="block max-h-52 w-full object-cover" />
             <button
               onClick={clearRef}
               disabled={busy}
-              className="absolute left-2 top-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white"
+              className="absolute start-2 top-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white"
             >
-              <X size={14} /> حذف
+              <X size={14} /> {t('remove')}
             </button>
           </div>
         )}
@@ -650,14 +656,14 @@ export default function GeneratePage() {
         <label className="mb-4 flex cursor-pointer items-center gap-2.5 rounded-[12px] border border-[rgba(40,215,255,0.22)] bg-[rgba(40,215,255,0.06)] px-3.5 py-2.5">
           <input type="checkbox" checked={useStreaming} onChange={(e) => setUseStreaming(e.target.checked)} disabled={busy} className="accent-[#28d7ff]" />
           <span className="text-sm text-[#dbe0ef]">
-            <Sparkles size={14} className="ml-1.5 inline text-[var(--dz-cyan)]" />
-            السحب المباشر (Streaming) — يعرض الصورة تدريجيًا أثناء التوليد
+            <Sparkles size={14} className="ms-1.5 inline text-[var(--dz-cyan)]" />
+            {t('streamingLabel')}
           </span>
         </label>
       )}
 
       <Button fullWidth size="lg" onClick={submit} loading={busy} disabled={!prompt || modelsLoading} leftIcon={mode === 'image' ? <ImageIcon size={18} /> : <VideoIcon size={18} />}>
-        {enhancing ? 'جاري تحسين البرومبت...' : running ? pollingText || 'جاري التوليد...' : mode === 'image' ? 'توليد الصورة' : 'توليد الفيديو'}
+        {enhancing ? t('btnEnhancing') : running ? pollingText || t('btnGenerating') : mode === 'image' ? t('btnGenerateImage') : t('btnGenerateVideo')}
         <span className="shine" />
       </Button>
 
@@ -675,20 +681,20 @@ export default function GeneratePage() {
       {currentModel ? (
         <>
           <div>
-            <div className="lbl">النموذج الحالي</div>
+            <div className="lbl">{t('infoCurrentModel')}</div>
             <div className="rounded-[12px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-3">
               <div className="font-bold text-white">{currentModel.name}</div>
               <div dir="ltr" className="mt-1 truncate text-xs text-[var(--dz-text-3)]">{currentModel.id}</div>
               {supportsStream && (
                 <span className="badge badge-cyan mt-2">
-                  <Sparkles size={11} /> يدعم السحب المباشر
+                  <Sparkles size={11} /> {t('supportsStream')}
                 </span>
               )}
             </div>
           </div>
           {supportedKeys.length > 0 && (
             <div>
-              <div className="lbl">الخصائص المدعومة</div>
+              <div className="lbl">{t('infoSupportedParams')}</div>
               <div className="flex flex-wrap gap-1.5">
                 {supportedKeys.map((k) => (
                   <span key={k} dir="ltr" className="badge">{k}</span>
@@ -698,7 +704,7 @@ export default function GeneratePage() {
           )}
           {mode === 'video' && videoResolutions.length > 0 && (
             <div>
-              <div className="lbl">دقات مدعومة</div>
+              <div className="lbl">{t('infoSupportedResolutions')}</div>
               <div className="flex flex-wrap gap-1.5">
                 {videoResolutions.map((r) => (
                   <span key={r} dir="ltr" className="badge">{r}</span>
@@ -708,7 +714,7 @@ export default function GeneratePage() {
           )}
           {mode === 'video' && videoRatios.length > 0 && (
             <div>
-              <div className="lbl">نسب أبعاد مدعومة</div>
+              <div className="lbl">{t('infoSupportedRatios')}</div>
               <div className="flex flex-wrap gap-1.5">
                 {videoRatios.map((r) => (
                   <span key={r} dir="ltr" className="badge">{r}</span>
@@ -718,10 +724,10 @@ export default function GeneratePage() {
           )}
         </>
       ) : (
-        <p className="text-[var(--dz-text-2)]">اختر نموذجًا من تبويب الخصائص لعرض تفاصيله.</p>
+        <p className="text-[var(--dz-text-2)]">{t('infoEmpty')}</p>
       )}
       <div className="rounded-[12px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-3 text-xs leading-relaxed text-[var(--dz-text-2)]">
-        💡 نصيحة: صف الموضوع، الإضاءة، زاوية الكاميرا، والأسلوب. أو اكتب فكرة قصيرة واستخدم «تحسين بالذكاء الاصطناعي».
+        {t('infoTip')}
       </div>
     </div>
   );
@@ -732,8 +738,8 @@ export default function GeneratePage() {
       <span className="grid h-14 w-14 place-items-center rounded-full border border-[rgba(53,214,122,0.4)] bg-[rgba(53,214,122,0.12)] text-[var(--dz-green)]">
         <CheckCircle2 size={28} />
       </span>
-      <h3 className="mt-3 text-lg font-extrabold text-[var(--dz-green)]">تم التوليد بنجاح!</h3>
-      <p className="mt-1 text-xs text-[var(--dz-text-3)]">عمل رائع — نتيجتك جاهزة للتنزيل والمشاركة.</p>
+      <h3 className="mt-3 text-lg font-extrabold text-[var(--dz-green)]">{t('successTitle')}</h3>
+      <p className="mt-1 text-xs text-[var(--dz-text-3)]">{t('successSubtitle')}</p>
 
       <div className="mt-5 w-full space-y-2.5">
         {result.assets.length > 0 && (
@@ -744,15 +750,15 @@ export default function GeneratePage() {
             }
             leftIcon={<Download size={17} />}
           >
-            تنزيل {result.assets.length > 1 ? `(${result.assets.length})` : ''}
+            {result.assets.length > 1 ? t('downloadCount', { count: result.assets.length }) : t('download')}
             <span className="shine" />
           </Button>
         )}
         <Button fullWidth variant="secondary" onClick={() => setResult(null)} leftIcon={<RefreshCw size={16} />}>
-          توليد آخر
+          {t('regenerate')}
         </Button>
         <Button fullWidth variant="ghost" onClick={copyPrompt} leftIcon={copied ? <Check size={16} className="text-[var(--dz-green)]" /> : <Copy size={16} />}>
-          {copied ? 'تم النسخ!' : 'نسخ البرومبت'}
+          {copied ? t('copied') : t('copyPrompt')}
         </Button>
       </div>
 
@@ -760,11 +766,11 @@ export default function GeneratePage() {
       <dl className="mt-6 w-full space-y-2 border-t border-[var(--dz-border)] pt-4 text-sm">
         {(
           [
-            ['النوع', mode === 'image' ? 'صورة' : 'فيديو'],
-            ['النموذج', currentModel?.name || selectedModelId],
-            ['عدد الأصول', String(result.assets.length)],
-            result.cost != null ? ['التكلفة', `$${Number(result.cost).toFixed(4)}`] : null,
-            result.at ? ['التاريخ', new Date(result.at).toLocaleString('ar', { dateStyle: 'medium', timeStyle: 'short' })] : null,
+            [t('metaType'), mode === 'image' ? t('modeImage') : t('modeVideo')],
+            [t('metaModel'), currentModel?.name || selectedModelId],
+            [t('metaAssetCount'), String(result.assets.length)],
+            result.cost != null ? [t('metaCost'), `$${Number(result.cost).toFixed(4)}`] : null,
+            result.at ? [t('metaDate'), new Date(result.at).toLocaleString('ar', { dateStyle: 'medium', timeStyle: 'short' })] : null,
           ].filter(Boolean) as [string, string][]
         ).map(([k, v]) => (
           <div key={k} className="flex items-center justify-between gap-3">
@@ -780,7 +786,7 @@ export default function GeneratePage() {
     <div className="gen-layout-v2">
       {/* PREVIEW PANEL — dominant, reading-start side (right in RTL) */}
       <section
-        aria-label="المعاينة"
+        aria-label={t('previewLabel')}
         className={`relative flex min-h-[480px] flex-col overflow-hidden rounded-[22px] border border-[var(--dz-border)] bg-[var(--dz-panel)] p-4 lg:min-h-[620px] ${
           running ? 'gen-border-active' : ''
         }`}
@@ -788,9 +794,9 @@ export default function GeneratePage() {
         {busy && (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
             <div className="spin-slow h-16 w-16 rounded-full" style={{ border: '4px solid rgba(47,109,246,0.2)', borderTopColor: 'var(--dz-blue)' }} />
-            <div className="text-sm text-[var(--dz-text-2)]">{enhancing ? 'جاري تحسين البرومبت...' : pollingText || 'جاري التوليد...'}</div>
+            <div className="text-sm text-[var(--dz-text-2)]">{enhancing ? t('previewBusyEnhance') : pollingText || t('previewBusyGenerate')}</div>
             {mode === 'image' && useStreaming && supportsStream && partialProgress > 0 && (
-              <div className="text-xs text-[var(--dz-cyan)]">تم استلام {partialProgress} تحديثًا...</div>
+              <div className="text-xs text-[var(--dz-cyan)]">{t('streamUpdates', { count: partialProgress })}</div>
             )}
           </div>
         )}
@@ -800,13 +806,13 @@ export default function GeneratePage() {
             <span className="grid h-20 w-20 place-items-center rounded-[24px] bg-[rgba(47,109,246,0.12)]">
               <Wallpaper size={34} className="text-[var(--dz-blue-hover)]" />
             </span>
-            <div className="text-sm font-semibold text-[#dbe0ef]">معاينتك ستظهر هنا</div>
+            <div className="text-sm font-semibold text-[#dbe0ef]">{t('previewEmptyTitle')}</div>
             <div className="max-w-xs text-xs leading-relaxed text-[var(--dz-text-3)]">
-              اكتب البرومبت في لوحة الخصائص، اختر الأسلوب والإعدادات، ثم اضغط «توليد».
+              {t('previewEmptyDesc')}
             </div>
             <div className="mt-1 flex flex-wrap justify-center gap-1.5">
-              {['سينمائي', 'واقعي', 'إعلان منتج', '3D'].map((t) => (
-                <span key={t} className="dz-chip !cursor-default">{t}</span>
+              {[t('stylePreset.cinematic'), t('stylePreset.photorealistic'), t('stylePreset.product'), '3D'].map((c) => (
+                <span key={c} className="dz-chip !cursor-default">{c}</span>
               ))}
             </div>
           </div>
@@ -818,15 +824,15 @@ export default function GeneratePage() {
               {result.assets.map((a, i) => (
                 <div key={i} className="group relative overflow-hidden rounded-[16px] border border-[var(--dz-border)] bg-[var(--dz-bg)]">
                   {mode === 'image' ? (
-                    <img src={a} alt={`نتيجة ${i + 1}`} className="mx-auto block max-h-[70vh] w-auto max-w-full" />
+                    <img src={a} alt={t('resultAlt', { index: i + 1 })} className="mx-auto block max-h-[70vh] w-auto max-w-full" />
                   ) : (
                     <video src={a} controls playsInline className="block max-h-[70vh] w-full" />
                   )}
                   <button
                     onClick={() => downloadAsset(a, `orms-${result.id}-${i}.${mode === 'image' ? 'png' : 'mp4'}`)}
-                    className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                    className="absolute bottom-2 start-2 flex items-center gap-1.5 rounded-[10px] bg-black/70 px-2.5 py-1.5 text-xs text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                   >
-                    <Download size={14} /> تنزيل
+                    <Download size={14} /> {t('download')}
                   </button>
                 </div>
               ))}
@@ -836,24 +842,24 @@ export default function GeneratePage() {
       </section>
 
       {/* SIDE PANEL — Properties / Info tabs, or success state after completion */}
-      <aside className="overflow-hidden rounded-[22px] border border-[var(--dz-border)] bg-[var(--dz-card)] p-5" aria-label="الإعدادات">
+      <aside className="overflow-hidden rounded-[22px] border border-[var(--dz-border)] bg-[var(--dz-card)] p-5" aria-label={t('settingsLabel')}>
         {showSuccess ? (
           SuccessPanel
         ) : (
           <>
             <div className="mb-5 flex items-center justify-between gap-2">
               <div>
-                <h2 className="font-display text-lg font-extrabold text-white">إنشاء جديد</h2>
-                <p className="mt-0.5 text-xs text-[var(--dz-text-3)]">برومبت واحد يفصلك عن نتيجة مذهلة.</p>
+                <h2 className="font-display text-lg font-extrabold text-white">{t('createTitle')}</h2>
+                <p className="mt-0.5 text-xs text-[var(--dz-text-3)]">{t('subtitle')}</p>
               </div>
-              <div className="segmented !p-1" role="tablist" aria-label="لوحة الإعدادات">
+              <div className="segmented !p-1" role="tablist" aria-label={t('panelTabsLabel')}>
                 <button
                   role="tab"
                   aria-selected={panelTab === 'props'}
                   className={`segmented-tab !px-3 !py-1.5 !text-xs ${panelTab === 'props' ? 'is-active' : ''}`}
                   onClick={() => setPanelTab('props')}
                 >
-                  <SlidersHorizontal size={13} /> خصائص
+                  <SlidersHorizontal size={13} /> {t('tabProps')}
                 </button>
                 <button
                   role="tab"
@@ -861,7 +867,7 @@ export default function GeneratePage() {
                   className={`segmented-tab !px-3 !py-1.5 !text-xs ${panelTab === 'info' ? 'is-active' : ''}`}
                   onClick={() => setPanelTab('info')}
                 >
-                  <Info size={13} /> معلومات
+                  <Info size={13} /> {t('tabInfo')}
                 </button>
               </div>
             </div>

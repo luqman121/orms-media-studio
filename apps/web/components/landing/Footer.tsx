@@ -1,43 +1,44 @@
 import Link from 'next/link';
+import { getTranslations } from 'next-intl/server';
 import Logo from '../ui/Logo';
 
-const columns: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
-  {
-    title: 'المنتج',
-    links: [
-      { label: 'المولّد', href: '/generate' },
-      { label: 'المعرض', href: '#gallery' },
-      { label: 'الباقات', href: '#pricing' },
-    ],
-  },
-  {
-    title: 'الموارد',
-    links: [
-      { label: 'المميزات', href: '#features' },
-      { label: 'دليل الاستخدام', href: '#faq' },
-      { label: 'الأسئلة الشائعة', href: '#faq' },
-    ],
-  },
-  {
-    title: 'الحساب',
-    links: [
-      { label: 'تسجيل الدخول', href: '/auth' },
-      { label: 'إنشاء حساب', href: '/auth' },
-      { label: 'لوحة التحكم', href: '/dashboard' },
-    ],
-  },
-];
+export default async function Footer() {
+  const t = await getTranslations('landing.footer');
 
-export default function Footer() {
+  const columns: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
+    {
+      title: t('colProduct'),
+      links: [
+        { label: t('linkGenerator'), href: '/generate' },
+        { label: t('linkGallery'), href: '#gallery' },
+        { label: t('linkPricing'), href: '#pricing' },
+      ],
+    },
+    {
+      title: t('colResources'),
+      links: [
+        { label: t('linkFeatures'), href: '#features' },
+        { label: t('linkGuide'), href: '#faq' },
+        { label: t('linkFaq'), href: '#faq' },
+      ],
+    },
+    {
+      title: t('colAccount'),
+      links: [
+        { label: t('linkLogin'), href: '/auth' },
+        { label: t('linkRegister'), href: '/auth' },
+        { label: t('linkDashboard'), href: '/dashboard' },
+      ],
+    },
+  ];
+
   return (
     <footer className="relative overflow-hidden border-t border-[rgba(169,154,241,0.10)] pt-16">
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6">
         <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
             <Logo />
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-text-500">
-              استوديو الذكاء الاصطناعي لتوليد الصور والفيديو من فكرة واحدة، عبر نماذج OpenRouter المتعددة في واجهة عربية واحدة.
-            </p>
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-text-500">{t('desc')}</p>
           </div>
           {columns.map((col) => (
             <div key={col.title}>
@@ -56,10 +57,10 @@ export default function Footer() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-[rgba(169,154,241,0.10)] py-6 text-xs text-text-500 sm:flex-row">
-          <span>© {new Date().getFullYear()} ORMS Studio — جميع الحقوق محفوظة.</span>
+          <span>{t('copyright', { year: new Date().getFullYear() })}</span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-success-500" />
-            مدعوم بواسطة OpenRouter
+            {t('poweredBy')}
           </span>
         </div>
       </div>

@@ -1,13 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Sparkles, Image as ImageIcon, Video, Wand2, Play, ArrowLeft } from 'lucide-react';
 
+// Mode metadata is structural (key + icon + catalog placeholder key). Labels and
+// placeholder copy are localized via `landing.hero.*`.
 const modes = [
-  { key: 'image', label: 'صورة', icon: ImageIcon, placeholder: 'إعلان سينمائي لعطر فاخر على خلفية بنفسجية مضيئة، إضاءة درامية، دقة 4K' },
-  { key: 'video', label: 'فيديو', icon: Video, placeholder: 'مشهد بطيء لقطرة ماء تتساقط على ثمرة فراولة، حركة كاميرا ناعمة، إضاءة استوديو' },
-  { key: 'ad', label: 'إعلان', icon: Sparkles, placeholder: 'إعلان منتج عناية بالبشرة، خلفية نظيفة، ألوان فاتحة، أسلوب احترافي' },
-  { key: '3d', label: '3D', icon: Wand2, placeholder: 'مجسّم ثلاثي الأبعاد لعبوة منتج، خامة زجاجية، انعكاسات ناعمة، خلفية داكنة' },
+  { key: 'image', labelKey: 'modeImage', placeholderKey: 'placeholderImage', icon: ImageIcon },
+  { key: 'video', labelKey: 'modeVideo', placeholderKey: 'placeholderVideo', icon: Video },
+  { key: 'ad', labelKey: 'modeAd', placeholderKey: 'placeholderAd', icon: Sparkles },
+  { key: '3d', labelKey: 'mode3d', placeholderKey: 'placeholder3d', icon: Wand2 },
 ] as const;
 
 const showcaseModels = ['Sora 2', 'Veo 3.1', 'Flux', 'Kling v3', 'Wan 2.7', 'Seedance', 'GPT-Image', 'Gemini', 'Hailuo', 'Grok'];
@@ -17,6 +20,7 @@ function prefersReducedMotion() {
 }
 
 export default function Hero() {
+  const t = useTranslations('landing.hero');
   const [mode, setMode] = useState<(typeof modes)[number]['key']>('image');
   const [manual, setManual] = useState(false);
   const active = modes.find((m) => m.key === mode)!;
@@ -24,7 +28,7 @@ export default function Hero() {
   // Typewriter effect — re-types the active mode's prompt whenever it changes.
   const [typed, setTyped] = useState('');
   useEffect(() => {
-    const full = active.placeholder;
+    const full = t(active.placeholderKey);
     if (prefersReducedMotion()) {
       setTyped(full);
       return;
@@ -37,7 +41,7 @@ export default function Hero() {
       if (i >= full.length) clearInterval(id);
     }, 26);
     return () => clearInterval(id);
-  }, [active.placeholder]);
+  }, [active.placeholderKey, t]);
 
   // Gently cycle the modes to showcase them — stops the moment the user picks one.
   useEffect(() => {
@@ -77,38 +81,37 @@ export default function Hero() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-500 opacity-70" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-cyan-500" />
             </span>
-            مولّد الصور والفيديو بالذكاء الاصطناعي عبر OpenRouter
+            {t('badge')}
           </span>
 
           <h1
             className="font-display mt-6 text-balance text-[clamp(2.6rem,7vw,4.5rem)] font-extrabold leading-[1.05] animate-fade-up"
             style={{ animationDelay: '60ms' }}
           >
-            حوّل فكرة واحدة إلى
-            <br className="hidden sm:block" /> <span className="gradient-text-sheen">صور وفيديوهات</span> احترافية
+            {t('headlineLead')}
+            <br className="hidden sm:block" /> <span className="gradient-text-sheen">{t('headlineHighlight')}</span> {t('headlineTail')}
           </h1>
 
           <p
             className="mx-auto mt-6 max-w-[640px] text-balance text-[clamp(1rem,2.2vw,1.15rem)] leading-relaxed text-text-200 animate-fade-up"
             style={{ animationDelay: '120ms' }}
           >
-            منصة ORMS تجمع أقوى نماذج الذكاء الاصطناعي في واجهة عربية واحدة — لتوليد الصور، الفيديوهات،
-            الإعلانات والمحتوى الإبداعي خلال ثوانٍ.
+            {t('desc')}
           </p>
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row animate-fade-up" style={{ animationDelay: '180ms' }}>
             <Link href="/generate" className="btn-primary w-full sm:w-auto">
-              <Sparkles size={18} /> ابدأ التوليد الآن
+              <Sparkles size={18} /> {t('ctaStart')}
               <span className="shine" />
             </Link>
             <a href="#demo" className="btn-secondary w-full sm:w-auto">
-              <Play size={16} /> شاهد كيف يعمل
+              <Play size={16} /> {t('ctaDemo')}
             </a>
           </div>
 
           {/* Model marquee — social proof */}
           <div className="mt-10 animate-fade-up" style={{ animationDelay: '220ms' }}>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-500">مدعوم بأفضل نماذج الذكاء الاصطناعي</p>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-500">{t('modelsPowered')}</p>
             <div className="marquee-mask relative overflow-hidden">
               <div className="flex w-max gap-3 animate-marquee">
                 {[...showcaseModels, ...showcaseModels].map((name, i) => (
@@ -150,13 +153,13 @@ export default function Hero() {
                     }}
                     className={`segmented-tab ${m.key === mode ? 'is-active' : ''}`}
                   >
-                    <Icon size={15} /> {m.label}
+                    <Icon size={15} /> {t(m.labelKey)}
                   </button>
                 );
               })}
             </div>
 
-            <div className="prompt-box relative flex flex-col justify-between text-right" role="textbox" aria-readonly>
+            <div className="prompt-box relative flex flex-col justify-between text-start" role="textbox" aria-readonly>
               <p className="text-text-200">
                 {typed}
                 <span className="type-caret" aria-hidden />
@@ -167,7 +170,7 @@ export default function Hero() {
                   <span className="badge">HD</span>
                 </div>
                 <Link href="/generate" className="btn-primary !min-h-[44px] !px-5 text-sm">
-                  توليد <ArrowLeft size={16} />
+                  {t('generate')} <ArrowLeft size={16} />
                   <span className="shine" />
                 </Link>
               </div>
@@ -175,14 +178,14 @@ export default function Hero() {
           </div>
 
           {/* floating stat cards */}
-          <FloatCard className="right-[-14px] top-8 sm:right-[-40px]" delay="0s">
-            ⚡ توليد فوري
+          <FloatCard className="end-[-14px] top-8 sm:end-[-40px]" delay="0s">
+            {t('floatInstant')}
           </FloatCard>
-          <FloatCard className="left-[-14px] top-24 sm:left-[-40px]" delay="1.2s">
-            🎬 فيديو جاهز
+          <FloatCard className="start-[-14px] top-24 sm:start-[-40px]" delay="1.2s">
+            {t('floatVideo')}
           </FloatCard>
-          <FloatCard className="left-6 bottom-[-16px] sm:left-16" delay="0.6s">
-            🖼️ دقة 4K
+          <FloatCard className="start-6 bottom-[-16px] sm:start-16" delay="0.6s">
+            {t('float4k')}
           </FloatCard>
         </div>
       </div>

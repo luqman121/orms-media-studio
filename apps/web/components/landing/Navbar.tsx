@@ -1,17 +1,21 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Menu, X } from 'lucide-react';
 import Logo from '../ui/Logo';
 
+// Nav anchors are structural (href + catalog key); labels come from the
+// `landing.navbar.*` catalog.
 const links = [
-  { href: '#features', label: 'المميزات' },
-  { href: '#gallery', label: 'المعرض' },
-  { href: '#pricing', label: 'الباقات' },
-  { href: '#faq', label: 'الأسئلة' },
-];
+  { href: '#features', key: 'features' },
+  { href: '#gallery', key: 'gallery' },
+  { href: '#pricing', key: 'pricing' },
+  { href: '#faq', key: 'faq' },
+] as const;
 
 export default function Navbar() {
+  const t = useTranslations('landing.navbar');
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -38,24 +42,24 @@ export default function Navbar() {
               href={l.href}
               className="rounded-mdx px-3.5 py-2 text-sm font-semibold text-text-400 transition-colors hover:bg-[rgba(169,154,241,0.08)] hover:text-text-100"
             >
-              {l.label}
+              {t(l.key)}
             </a>
           ))}
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
           <Link href="/auth" className="btn-ghost px-4 py-2 text-sm">
-            تسجيل الدخول
+            {t('login')}
           </Link>
           <Link href="/generate" className="btn-primary !min-h-[44px] !px-5 text-sm">
-            ابدأ الآن
+            {t('start')}
           </Link>
         </div>
 
         <button
           className="btn-ghost md:hidden !p-2"
           onClick={() => setOpen((v) => !v)}
-          aria-label={open ? 'إغلاق القائمة' : 'فتح القائمة'}
+          aria-label={open ? t('closeMenu') : t('openMenu')}
           aria-expanded={open}
         >
           {open ? <X size={22} /> : <Menu size={22} />}
@@ -71,15 +75,15 @@ export default function Navbar() {
               onClick={() => setOpen(false)}
               className="block rounded-mdx px-3 py-2.5 text-sm font-semibold text-text-200 hover:bg-[rgba(169,154,241,0.08)]"
             >
-              {l.label}
+              {t(l.key)}
             </a>
           ))}
           <div className="mt-2 flex gap-2 border-t border-[rgba(169,154,241,0.10)] pt-3">
             <Link href="/auth" className="btn-secondary flex-1 !min-h-[44px] text-sm">
-              دخول
+              {t('loginShort')}
             </Link>
             <Link href="/generate" className="btn-primary flex-1 !min-h-[44px] text-sm">
-              ابدأ الآن
+              {t('start')}
             </Link>
           </div>
         </div>

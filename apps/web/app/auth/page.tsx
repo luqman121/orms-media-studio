@@ -4,6 +4,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { AlertCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import Card from '../../components/ui/Card';
@@ -12,6 +13,7 @@ import Tabs from '../../components/ui/Tabs';
 import { Field, Input } from '../../components/ui/Field';
 
 export default function AuthPage() {
+  const t = useTranslations('auth');
   const { login, register } = useAuth();
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -30,7 +32,7 @@ export default function AuthPage() {
       else await register(email, password, name);
       router.push('/generate');
     } catch (err) {
-      setError((err as Error).message || 'حدث خطأ');
+      setError((err as Error).message || t('errGeneric'));
     } finally {
       setLoading(false);
     }
@@ -52,35 +54,35 @@ export default function AuthPage() {
             className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-[22px] font-display text-2xl font-extrabold text-white"
             style={{ background: 'linear-gradient(135deg,#864FF2,#5195ED 55%,#36C4F0)', boxShadow: '0 18px 45px rgba(134,79,242,0.4)' }}
           >
-            OR
+            {t('logoText')}
           </div>
           <h1 className="font-display text-2xl font-extrabold">
-            <span className="gradient-text">استوديو الصور والفيديو</span>
+            <span className="gradient-text">{t('title')}</span>
           </h1>
-          <p className="mt-1.5 text-sm text-text-400">بدفعة واحدة عبر OpenRouter</p>
+          <p className="mt-1.5 text-sm text-text-400">{t('subtitle')}</p>
         </div>
 
         <Tabs
-          ariaLabel="نوع الحساب"
+          ariaLabel={t('tabsLabel')}
           className="mb-6"
           value={mode}
           onChange={setMode}
           items={[
-            { value: 'login', label: 'دخول' },
-            { value: 'register', label: 'حساب جديد' },
+            { value: 'login', label: t('login') },
+            { value: 'register', label: t('register') },
           ]}
         />
 
         <form onSubmit={submit} className="flex flex-col gap-4">
           {mode === 'register' && (
-            <Field label="الاسم (اختياري)" htmlFor="name">
-              <Input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="لقمان" />
+            <Field label={t('nameLabel')} htmlFor="name">
+              <Input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('namePlaceholder')} />
             </Field>
           )}
-          <Field label="البريد الإلكتروني" htmlFor="email">
+          <Field label={t('emailLabel')} htmlFor="email">
             <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
           </Field>
-          <Field label="كلمة المرور" htmlFor="password">
+          <Field label={t('passwordLabel')} htmlFor="password">
             <Input id="password" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
           </Field>
 
@@ -91,17 +93,17 @@ export default function AuthPage() {
           )}
 
           <Button type="submit" fullWidth size="lg" loading={loading} className="mt-1" rightIcon={<ArrowRight size={18} />}>
-            {mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب'}
+            {mode === 'login' ? t('submitLogin') : t('submitRegister')}
             <span className="shine" />
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs leading-relaxed text-text-500">
-          ⚡ النماذج الخلفية: Stable Diffusion • Flux • Veo • Sora • Wan • Kling
+          {t('backendModels')}
         </p>
         <p className="mt-4 text-center text-sm">
           <Link href="/" className="text-text-400 transition-colors hover:text-text-100">
-            ← العودة للصفحة الرئيسية
+            {t('backHome')}
           </Link>
         </p>
       </Card>

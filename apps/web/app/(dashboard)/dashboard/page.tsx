@@ -5,6 +5,7 @@
 // filtering/search is purely client-side. No new backend behaviour.
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import {
   Search,
   Sparkles,
@@ -41,13 +42,6 @@ interface Gen {
 type TypeFilter = 'all' | 'image' | 'video';
 type StatusFilter = 'all' | 'completed' | 'in_progress' | 'pending' | 'failed';
 
-const statusLabel: Record<string, string> = {
-  completed: 'مكتمل',
-  pending: 'قيد الانتظار',
-  in_progress: 'قيد التوليد',
-  failed: 'فشل',
-};
-
 function downloadAsset(url: string, name: string) {
   const a = document.createElement('a');
   a.href = url;
@@ -61,6 +55,7 @@ function downloadAsset(url: string, name: string) {
 const SKELETON_HEIGHTS = [220, 300, 180, 260, 320, 200, 280, 240];
 
 export default function DashboardHome() {
+  const t = useTranslations('dashboard');
   const { user } = useAuth();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [items, setItems] = useState<Gen[]>([]);
@@ -106,17 +101,17 @@ export default function DashboardHome() {
       {/* Header: greeting + search + stats */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="min-w-0">
-          <h1 className="font-display text-[1.45rem] font-extrabold text-white">أهلًا{name ? `، ${name}` : ' بك'} 👋</h1>
-          <p className="mt-0.5 text-sm text-[var(--dz-text-3)]">معرض أعمالك المُولّدة بالذكاء الاصطناعي.</p>
+          <h1 className="font-display text-[1.45rem] font-extrabold text-white">{name ? t('greetingWithName', { name }) : t('greeting')}</h1>
+          <p className="mt-0.5 text-sm text-[var(--dz-text-3)]">{t('subtitle')}</p>
         </div>
-        <div className="relative mr-auto w-full max-w-[340px] min-w-[200px]">
-          <Search size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--dz-text-3)]" />
+        <div className="relative ms-auto w-full max-w-[340px] min-w-[200px]">
+          <Search size={16} className="pointer-events-none absolute end-3.5 top-1/2 -translate-y-1/2 text-[var(--dz-text-3)]" />
           <input
-            className="field !min-h-[44px] !rounded-[12px] !py-2.5 !pr-10 text-sm"
-            placeholder="ابحث في أعمالك..."
+            className="field !min-h-[44px] !rounded-[12px] !py-2.5 !pe-10 text-sm"
+            placeholder={t('searchPlaceholder')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            aria-label="بحث"
+            aria-label={t('searchLabel')}
           />
         </div>
       </div>
@@ -125,13 +120,13 @@ export default function DashboardHome() {
       {usage && (
         <div className="mb-5 flex flex-wrap gap-2">
           <span className="dz-chip !cursor-default">
-            <Layers size={13} className="text-[var(--dz-blue-hover)]" /> {usage.total_generations} توليد
+            <Layers size={13} className="text-[var(--dz-blue-hover)]" /> {t('statGenerations', { count: usage.total_generations })}
           </span>
           <span className="dz-chip !cursor-default">
-            <ImageIcon size={13} className="text-[var(--dz-cyan)]" /> {usage.by_type?.image?.count ?? 0} صورة
+            <ImageIcon size={13} className="text-[var(--dz-cyan)]" /> {t('statImages', { count: usage.by_type?.image?.count ?? 0 })}
           </span>
           <span className="dz-chip !cursor-default">
-            <VideoIcon size={13} className="text-[var(--dz-green)]" /> {usage.by_type?.video?.count ?? 0} فيديو
+            <VideoIcon size={13} className="text-[var(--dz-green)]" /> {t('statVideos', { count: usage.by_type?.video?.count ?? 0 })}
           </span>
           <span className="dz-chip !cursor-default">
             <Coins size={13} className="text-[#ffd166]" /> ${(usage.total_cost_usd ?? 0).toFixed(4)}
@@ -141,40 +136,40 @@ export default function DashboardHome() {
 
       {/* Category chips + status filter (ref: All/Abstract/… + Filter dropdown) */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="تصفية حسب النوع">
-          {(
-            [
-              { v: 'all', label: 'الكل' },
-              { v: 'image', label: 'صور' },
-              { v: 'video', label: 'فيديو' },
-            ] as { v: TypeFilter; label: string }[]
-          ).map((c) => (
-            <button
-              key={c.v}
-              role="tab"
-              aria-selected={type === c.v}
-              className={`dz-chip ${type === c.v ? 'is-active' : ''}`}
-              onClick={() => setType(c.v)}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 text-sm text-[var(--dz-text-2)]">
-          <SlidersHorizontal size={15} className="text-[var(--dz-text-3)]" />
-          <select
-            className="field !w-auto !min-h-[38px] !rounded-[10px] !px-3 !py-1.5 text-sm"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as StatusFilter)}
-            aria-label="تصفية حسب الحالة"
-          >
-            <option value="all">كل الحالات</option>
-            <option value="completed">مكتمل</option>
-            <option value="in_progress">قيد التوليد</option>
-            <option value="pending">قيد الانتظار</option>
-            <option value="failed">فشل</option>
-          </select>
-        </label>
+<div className="flex flex-wrap gap-2" role="tablist" aria-label={t('typeFilterLabel')}>
+           {(
+             [
+               { v: 'all', label: t('filterAll') },
+               { v: 'image', label: t('filterImages') },
+               { v: 'video', label: t('filterVideos') },
+             ] as { v: TypeFilter; label: string }[]
+           ).map((c) => (
+             <button
+               key={c.v}
+               role="tab"
+               aria-selected={type === c.v}
+               className={`dz-chip ${type === c.v ? 'is-active' : ''}`}
+               onClick={() => setType(c.v)}
+             >
+               {c.label}
+             </button>
+           ))}
+         </div>
+         <label className="flex items-center gap-2 text-sm text-[var(--dz-text-2)]">
+           <SlidersHorizontal size={15} className="text-[var(--dz-text-3)]" />
+           <select
+             className="field !w-auto !min-h-[38px] !rounded-[10px] !px-3 !py-1.5 text-sm"
+             value={status}
+             onChange={(e) => setStatus(e.target.value as StatusFilter)}
+             aria-label={t('statusFilterLabel')}
+           >
+             <option value="all">{t('statusAll')}</option>
+             <option value="completed">{t('status.completed')}</option>
+             <option value="in_progress">{t('status.in_progress')}</option>
+             <option value="pending">{t('status.pending')}</option>
+             <option value="failed">{t('status.failed')}</option>
+           </select>
+         </label>
       </div>
 
       {/* Gallery */}
@@ -194,16 +189,16 @@ export default function DashboardHome() {
               <Sparkles size={26} />
             </span>
             <h3 className="text-lg font-bold text-white">
-              {items.length === 0 ? 'أنشئ أول عمل لك' : 'لا نتائج مطابقة'}
+              {items.length === 0 ? t('emptyFirstTitle') : t('emptyNoMatchTitle')}
             </h3>
             <p className="max-w-sm text-sm text-[var(--dz-text-2)]">
               {items.length === 0
-                ? 'اكتب وصفًا بسيطًا، اختر صورة أو فيديو، وسيتكفّل ORMS بالباقي.'
-                : 'جرّب تعديل البحث أو الفلاتر.'}
+                ? t('emptyFirstDesc')
+                : t('emptyNoMatchDesc')}
             </p>
             {items.length === 0 && (
               <Link href="/generate" className="btn-primary mt-2 text-sm">
-                <Sparkles size={16} /> افتح المولّد
+                <Sparkles size={16} /> {t('openGenerator')}
                 <span className="shine" />
               </Link>
             )}
@@ -226,35 +221,35 @@ export default function DashboardHome() {
                       <video src={url} muted playsInline loop preload="metadata" className="block w-full" />
                     ) : (
                       // Natural height so the masonry flows like the reference
-                      <img src={url} alt={it.prompt || 'عمل مولّد'} loading="lazy" className="block w-full" />
+                      <img src={url} alt={it.prompt || t('genAlt')} loading="lazy" className="block w-full" />
                     )
                   ) : (
                     <GradientArt seed={it.id} className="aspect-[4/5] w-full">
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/80">
                         {busy ? <Loader2 size={22} className="spin-slow" /> : <ImageIcon size={22} />}
-                        <span className="text-xs font-semibold">{statusLabel[it.status] || it.status}</span>
+                        <span className="text-xs font-semibold">{(['completed', 'pending', 'in_progress', 'failed'].includes(it.status) ? t(`status.${it.status}`) : it.status)}</span>
                       </div>
                     </GradientArt>
                   )}
-                  <div className="absolute right-2 top-2 flex gap-1.5">
+                  <div className="absolute end-2 top-2 flex gap-1.5">
                     <Badge tone={isVideo ? 'cyan' : 'default'}>
                       {isVideo ? <VideoIcon size={11} /> : <ImageIcon size={11} />}
-                      {isVideo ? 'فيديو' : 'صورة'}
+                      {isVideo ? t('badgeVideo') : t('badgeImage')}
                     </Badge>
                   </div>
                   {it.status === 'failed' && (
-                    <div className="absolute left-2 top-2">
-                      <Badge tone="danger">فشل</Badge>
+                    <div className="absolute start-2 top-2">
+                      <Badge tone="danger">{t('badgeFailed')}</Badge>
                     </div>
                   )}
                   {url && it.status === 'completed' && (
                     <button
                       onClick={() => downloadAsset(url, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)}
-                      title="تنزيل"
-                      aria-label="تنزيل"
-                      className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-[10px] bg-black/65 px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                      title={t('download')}
+                      aria-label={t('download')}
+                      className="absolute bottom-2 start-2 flex items-center gap-1.5 rounded-[10px] bg-black/65 px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                     >
-                      <Download size={13} /> تنزيل
+                      <Download size={13} /> {t('download')}
                     </button>
                   )}
                 </div>

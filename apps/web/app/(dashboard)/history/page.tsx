@@ -3,6 +3,7 @@
 // download) unchanged and uses the same endpoints.
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Trash2, Download, Loader2, Image as ImageIcon, Video as VideoIcon, Sparkles, AlertCircle } from 'lucide-react';
 import { api } from '../../../lib/api';
 import Card from '../../../components/ui/Card';
@@ -20,6 +21,7 @@ interface HistoryItem {
 }
 
 export default function HistoryPage() {
+  const t = useTranslations('history');
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
@@ -44,7 +46,7 @@ export default function HistoryPage() {
   }, [load]);
 
   async function onDelete(id: number) {
-    if (!confirm('متأكد من الحذف؟')) return;
+    if (!confirm(t('confirmDelete'))) return;
     try {
       await api.del(`/api/generate/generations/${id}`);
       setItems(items.filter((i) => i.id !== id));
@@ -60,29 +62,22 @@ export default function HistoryPage() {
     a.click();
   }
 
-  const statusLabel: Record<string, string> = {
-    completed: 'مكتمل',
-    pending: 'قيد الانتظار',
-    in_progress: 'قيد التوليد',
-    failed: 'فشل',
-  };
-
   return (
     <div className="mx-auto max-w-[1280px]">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-[1.7rem] font-extrabold text-text-100">السجل</h1>
-          <p className="mt-1 text-sm text-text-400">كل أعمالك المُولّدة في مكان واحد.</p>
+          <h1 className="font-display text-[1.7rem] font-extrabold text-text-100">{t('title')}</h1>
+          <p className="mt-1 text-sm text-text-400">{t('subtitle')}</p>
         </div>
         <Tabs
-          ariaLabel="تصفية"
+          ariaLabel={t('filterLabel')}
           value={filter}
           onChange={setFilter}
           className="!w-auto"
           items={[
-            { value: 'all', label: 'الكل' },
-            { value: 'image', label: 'صور' },
-            { value: 'video', label: 'فيديو' },
+            { value: 'all', label: t('filterAll') },
+            { value: 'image', label: t('filterImages') },
+            { value: 'video', label: t('filterVideos') },
           ]}
         />
       </div>
@@ -104,10 +99,10 @@ export default function HistoryPage() {
           <span className="grid h-14 w-14 place-items-center rounded-full bg-[rgba(134,79,242,0.14)] text-primary-400">
             <Sparkles size={26} />
           </span>
-          <h3 className="text-lg font-bold text-text-100">لا توجد نتائج بعد</h3>
-          <p className="max-w-sm text-sm text-text-500">ابدأ بكتابة أول Prompt لك من المولّد وستظهر أعمالك هنا.</p>
+          <h3 className="text-lg font-bold text-text-100">{t('emptyTitle')}</h3>
+          <p className="max-w-sm text-sm text-text-500">{t('emptyDesc')}</p>
           <Link href="/generate" className="btn-primary mt-2 text-sm">
-            <Sparkles size={16} /> افتح المولّد
+            <Sparkles size={16} /> {t('openGenerator')}
           </Link>
         </Card>
       ) : (
@@ -128,17 +123,17 @@ export default function HistoryPage() {
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-text-500">
                       {busy ? <Loader2 size={24} className="spin-slow" /> : <ImageIcon size={24} />}
-                      <div className="text-xs">{statusLabel[it.status] || it.status}</div>
+                      <div className="text-xs">{(['completed', 'pending', 'in_progress', 'failed'].includes(it.status) ? t(`status.${it.status}`) : it.status)}</div>
                     </div>
                   )}
-                  <div className="absolute right-2 top-2">
+                  <div className="absolute end-2 top-2">
                     <Badge tone={isVideo ? 'cyan' : 'default'}>
                       {isVideo ? <VideoIcon size={11} /> : <ImageIcon size={11} />}
                     </Badge>
                   </div>
                   {busy && (
-                    <div className="absolute left-2 top-2">
-                      <Badge tone="warning">{statusLabel[it.status]}</Badge>
+                    <div className="absolute start-2 top-2">
+                      <Badge tone="warning">{t(`status.${it.status}`)}</Badge>
                     </div>
                   )}
                 </div>
@@ -153,8 +148,8 @@ export default function HistoryPage() {
                     {previewUrl && it.status === 'completed' && (
                       <button
                         onClick={() => downloadAsset(previewUrl, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)}
-                        title="تنزيل"
-                        aria-label="تنزيل"
+                        title={t('download')}
+                        aria-label={t('download')}
                         className="rounded-mdx border border-[rgba(134,79,242,0.3)] bg-[rgba(134,79,242,0.15)] p-1.5 text-text-100 transition-colors hover:bg-[rgba(134,79,242,0.25)]"
                       >
                         <Download size={14} />
@@ -162,8 +157,8 @@ export default function HistoryPage() {
                     )}
                     <button
                       onClick={() => onDelete(it.id)}
-                      title="حذف"
-                      aria-label="حذف"
+                      title={t('delete')}
+                      aria-label={t('delete')}
                       className="rounded-mdx border border-[rgba(255,92,122,0.25)] bg-[rgba(255,92,122,0.1)] p-1.5 text-[#fda4af] transition-colors hover:bg-[rgba(255,92,122,0.2)]"
                     >
                       <Trash2 size={14} />
