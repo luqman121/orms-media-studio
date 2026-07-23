@@ -212,6 +212,60 @@
     "backendModels": "⚡ النماذج الخلفية: Stable Diffusion • Flux • Veo • Sora • Wan • Kling",
     "backHome": "← العودة للصفحة الرئيسية"
   },
+  "errors": {
+    "auth": {
+      "required": "التوثيق مطلوب",
+      "invalid": "رمز غير صالح",
+      "emailPasswordRequired": "البريد الإلكتروني وكلمة المرور مطلوبان",
+      "passwordTooShort": "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+      "emailInUse": "البريد الإلكتروني مستخدم بالفعل",
+      "invalidCredentials": "بيانات الدخول غير صحيحة",
+      "userNotFound": "المستخدم غير موجود"
+    },
+    "credits": {
+      "insufficient": "الرصيد غير كافٍ لإتمام هذا التوليد"
+    },
+    "generate": {
+      "modelRequired": "النموذج والبرومبت مطلوبان",
+      "modelNotImage": "النموذج المحدد غير مدعوم لتوليد الصور",
+      "modelNotVideo": "النموذج المحدد غير مدعوم لتوليد الفيديو",
+      "projectNotOwned": "المشروع غير موجود أو لا تملك صلاحية الوصول إليه",
+      "imageFailed": "فشل توليد الصورة",
+      "videoFailed": "فشل إرسال طلب الفيديو",
+      "videoAccepted": "تم استلام طلب الفيديو — استخدم GET /api/generate/generations/{id} للمتابعة",
+      "videoAlreadyAccepted": "تم استلام طلب الفيديو مسبقاً — استخدم GET /api/generate/generations/{id} للمتابعة",
+      "notVideoJob": "ليس طلب فيديو صالح"
+    },
+    "provider": {
+      "timeout": "انتهت مهلة التوليد. حاول مرة أخرى.",
+      "invalidInput": "تعذّر قبول الطلب من المزود. تحقّق من الإعدادات.",
+      "auth": "مشكلة في اعتماد المزود. تواصل مع الدعم.",
+      "rateLimited": "ضغط مرتفع على المزود. حاول بعد قليل.",
+      "unknown": "فشل التوليد لدى المزود. حاول مرة أخرى."
+    },
+    "sse": {
+      "streamError": "حدث خطأ أثناء بث الأحداث"
+    },
+    "assets": {
+      "notFound": "الأصل غير موجود أو لا تملك صلاحية الوصول إليه"
+    },
+    "models": {
+      "fetchFailed": "فشل جلب النماذج من OpenRouter"
+    },
+    "enhance": {
+      "promptRequired": "البرومبت مطلوب",
+      "providerKeyMissing": "مفتاح OpenRouter غير مُهيأ على الخادم",
+      "failed": "فشل تحسين البرومبت"
+    },
+    "generic": {
+      "notFound": "غير موجود",
+      "badRequest": "طلب غير صالح",
+      "serverError": "خطأ في الخادم",
+      "rateLimited": "تجاوزت حد الطلبات — حاول مرة أخرى قريباً",
+      "referenceImage": "فشل قراءة الصورة المرجعية",
+      "fileTooLarge": "حجم الملف كبير جداً"
+    }
+  },
   "landing": {
     "navbar": {
       "features": "المميزات",

@@ -7,6 +7,7 @@ import { SIGNUP_CREDITS } from '@orms/model-router';
 
 export class InsufficientCreditsError extends Error {
   status = 402;
+  readonly code = 'insufficient_credits';
   constructor() {
     super('الرصيد غير كافٍ لإتمام هذا التوليد');
     this.name = 'InsufficientCreditsError';

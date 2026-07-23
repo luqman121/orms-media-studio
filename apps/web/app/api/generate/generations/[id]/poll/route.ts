@@ -5,6 +5,7 @@ import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { putObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
@@ -17,8 +18,8 @@ export async function POST(req: Request, ctx: Ctx) {
     const userId = requireAuth(req);
     const { id } = await ctx.params;
     const row = await prisma.generation.findFirst({ where: { id: Number(id), userId } });
-    if (!row) return json({ error: 'غير موجود' }, 404);
-    if (row.type !== 'video' || !row.jobId) return json({ error: 'ليس طلب فيديو صالح' }, 400);
+    if (!row) throw new LocalizedError({ code: 'generic.notFound', status: 404 });
+    if (row.type !== 'video' || !row.jobId) throw new LocalizedError({ code: 'generate.notVideoJob', status: 400 });
     if (row.status === 'completed' || row.status === 'failed') return json({ status: row.status, id: row.id });
 
     try {
@@ -44,6 +45,9 @@ export async function POST(req: Request, ctx: Ctx) {
       });
       return json({ id: row.id, status });
     } catch (e) {
+      // Provider poll/download failure — surface the technical message (non-Arabic)
+      // as `detail`; the localized `error` bucket is generic server error.
+      console.error('[poll] provider failure', (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   } catch (e) {

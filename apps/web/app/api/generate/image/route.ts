@@ -13,8 +13,10 @@
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { estimateCredits, findModelDefinition, normalizeError, usdToCredits } from '@orms/model-router';
+import { getTranslations } from 'next-intl/server';
 import { requireAuth } from '@/lib/auth';
-import { parseRequest, json, handleError } from '@/lib/http';
+import { parseRequest, json, handleError, PROVIDER_CODE_TO_CATALOG_KEY } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { putObject } from '@/lib/storage';
 import { checkImageRateLimit } from '@/lib/ratelimit';
 import { reserveCredits, settleCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
@@ -65,8 +67,9 @@ export async function POST(req: Request) {
     userId = requireAuth(req);
     const rl = await checkImageRateLimit(userId);
     if (!rl.allowed) {
+      const t = await getTranslations('errors');
       return Response.json(
-        { error: 'تجاوزت حد الطلبات — حاول مرة أخرى قريباً', remaining: rl.remaining },
+        { error: t('generic.rateLimited'), remaining: rl.remaining },
         {
           status: 429,
           headers: {
@@ -78,7 +81,7 @@ export async function POST(req: Request) {
     }
     const { fields, file } = await parseRequest(req);
     if (!fields.model || !fields.prompt) {
-      return json({ error: 'النموذج والبرومبت مطلوبان' }, 400);
+      throw new LocalizedError({ code: 'generate.modelRequired', status: 400 });
     }
     const wantStream = fields.stream === true || fields.stream === 'true';
     const params = buildParams(fields);
@@ -89,7 +92,7 @@ export async function POST(req: Request) {
         const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
         params.input_references = [{ type: 'image_url', image_url: { url: dataUrl } }];
       } catch {
-        return json({ error: 'فشل قراءة الصورة المرجعية' }, 400);
+        throw new LocalizedError({ code: 'generic.referenceImage', status: 400 });
       }
     }
 
@@ -126,14 +129,14 @@ export async function POST(req: Request) {
     if (projectId != null) {
       const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
       if (!proj) {
-        return json({ error: 'المشروع غير موجود أو لا تملك صلاحية الوصول إليه' }, 403);
+        throw new LocalizedError({ code: 'generate.projectNotOwned', status: 403 });
       }
     }
 
     // Server-side capability validation via @orms/model-router (never trust the client).
     const modelDef = await findModelDefinition(fields.model);
     if (!modelDef || modelDef.mediaType !== 'image') {
-      return json({ error: 'النموذج المحدد غير مدعوم لتوليد الصور' }, 400);
+      throw new LocalizedError({ code: 'generate.modelNotImage', status: 400 });
     }
 
     // Server-side credit estimate (integer units). `n` defaults to 1.
@@ -202,6 +205,11 @@ export async function POST(req: Request) {
           type: 'failed',
           dataJson: JSON.stringify({ reason: 'insufficient_credits' }),
         });
+        // The persisted `Generation.error` mirrors the worker's Arabic-in-DB pattern
+        // (the worker writes `ne.messageAr` for provider failures); localizing the
+        // read path would require a schema error-code column + worker changes, which
+        // are out of scope for this strings-only slice. The HTTP response `error`
+        // field below IS localized via the catalog.
         await prisma.generation
           .update({
             where: { id: recordId },
@@ -209,8 +217,9 @@ export async function POST(req: Request) {
           })
           .catch(() => {});
         creditsReconciled = true; // nothing was reserved
+        const t = await getTranslations('errors');
         return json(
-          { id: recordId, error: 'الرصيد غير كافٍ لإتمام هذا التوليد', code: 'insufficient_credits' },
+          { id: recordId, error: t('credits.insufficient'), code: 'insufficient_credits' },
           402,
         );
       }
@@ -239,8 +248,13 @@ export async function POST(req: Request) {
         reason: 'generation failed',
       });
       creditsReconciled = true;
+      // Translate the provider error by its stable `code` via the request locale's
+      // `errors.provider.*` catalog; fall back to `messageAr` for unmapped codes.
+      const t = await getTranslations('errors');
+      const providerKey = PROVIDER_CODE_TO_CATALOG_KEY[ne.code];
+      const message = providerKey ? t(providerKey) : ne.messageAr;
       return json(
-        { id: recordId, error: ne.messageAr, code: ne.code, retryable: ne.retryable },
+        { id: recordId, error: message, code: ne.code, retryable: ne.retryable },
         ne.retryable ? 502 : 400,
       );
     }
@@ -274,7 +288,7 @@ export async function POST(req: Request) {
         name: fname,
       });
     }
-    if (saved.length === 0) throw new Error('لم يُرجع الموديل أي صورة');
+    if (saved.length === 0) throw new Error('model returned no images');
 
     // Persist normalized Asset rows (kept alongside the legacy assetPath for back-compat).
     if (assetRows.length > 0) {
@@ -344,7 +358,8 @@ export async function POST(req: Request) {
       await prisma.generation
         .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
         .catch(() => {});
-      return json({ id: recordId, error: 'فشل توليد الصورة', detail: (e as Error).message }, 502);
+      const t = await getTranslations('errors');
+      return json({ id: recordId, error: t('generate.imageFailed'), detail: (e as Error).message }, 502);
     }
     return handleError(e);
   }

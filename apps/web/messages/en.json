@@ -212,6 +212,60 @@
     "backendModels": "⚡ Backend models: Stable Diffusion • Flux • Veo • Sora • Wan • Kling",
     "backHome": "← Back to home page"
   },
+  "errors": {
+    "auth": {
+      "required": "Authentication required",
+      "invalid": "Invalid token",
+      "emailPasswordRequired": "Email and password are required",
+      "passwordTooShort": "Password must be at least 6 characters",
+      "emailInUse": "Email is already in use",
+      "invalidCredentials": "Invalid login credentials",
+      "userNotFound": "User not found"
+    },
+    "credits": {
+      "insufficient": "Insufficient credits to complete this generation"
+    },
+    "generate": {
+      "modelRequired": "Model and prompt are required",
+      "modelNotImage": "The selected model does not support image generation",
+      "modelNotVideo": "The selected model does not support video generation",
+      "projectNotOwned": "Project not found or you do not have access to it",
+      "imageFailed": "Failed to generate image",
+      "videoFailed": "Failed to send video request",
+      "videoAccepted": "Video request received — use GET /api/generate/generations/{id} to track it",
+      "videoAlreadyAccepted": "Video request already received — use GET /api/generate/generations/{id} to track it",
+      "notVideoJob": "Not a valid video job"
+    },
+    "provider": {
+      "timeout": "Generation timed out. Please try again.",
+      "invalidInput": "The provider could not accept the request. Check your settings.",
+      "auth": "Provider authentication issue. Please contact support.",
+      "rateLimited": "The provider is under heavy load. Please try again shortly.",
+      "unknown": "Generation failed at the provider. Please try again."
+    },
+    "sse": {
+      "streamError": "An error occurred while streaming events"
+    },
+    "assets": {
+      "notFound": "Asset not found or you do not have access to it"
+    },
+    "models": {
+      "fetchFailed": "Failed to fetch models from OpenRouter"
+    },
+    "enhance": {
+      "promptRequired": "Prompt is required",
+      "providerKeyMissing": "OpenRouter API key is not configured on the server",
+      "failed": "Failed to enhance prompt"
+    },
+    "generic": {
+      "notFound": "Not found",
+      "badRequest": "Invalid request",
+      "serverError": "Server error",
+      "rateLimited": "You exceeded the request limit — please try again soon",
+      "referenceImage": "Failed to read the reference image",
+      "fileTooLarge": "File is too large"
+    }
+  },
   "landing": {
     "navbar": {
       "features": "Features",

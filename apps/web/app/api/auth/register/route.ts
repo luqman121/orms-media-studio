@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@orms/db';
 import { sign } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { serializeUser } from '@/lib/serialize';
 import { grantSignupCredits } from '@/lib/credits';
 
@@ -16,12 +17,12 @@ export async function POST(req: Request) {
       password?: string;
       name?: string;
     };
-    if (!email || !password) return json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبان' }, 400);
-    if (password.length < 6) return json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' }, 400);
+    if (!email || !password) throw new LocalizedError({ code: 'auth.emailPasswordRequired', status: 400 });
+    if (password.length < 6) throw new LocalizedError({ code: 'auth.passwordTooShort', status: 400 });
 
     const lower = email.toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email: lower }, select: { id: true } });
-    if (existing) return json({ error: 'البريد الإلكتروني مستخدم بالفعل' }, 409);
+    if (existing) throw new LocalizedError({ code: 'auth.emailInUse', status: 409 });
 
     const hash = bcrypt.hashSync(password, 10);
     const user = await prisma.user.create({

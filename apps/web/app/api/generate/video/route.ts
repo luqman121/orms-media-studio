@@ -12,8 +12,10 @@
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
 import { estimateCredits, findModelDefinition, normalizeError } from '@orms/model-router';
+import { getTranslations } from 'next-intl/server';
 import { requireAuth } from '@/lib/auth';
-import { parseRequest, json, handleError } from '@/lib/http';
+import { parseRequest, json, handleError, PROVIDER_CODE_TO_CATALOG_KEY } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { enqueueVideoJob } from '@/lib/queue';
 import { pollAndDownloadVideo } from '@/lib/videoPoll';
 import { checkVideoRateLimit } from '@/lib/ratelimit';
@@ -37,8 +39,9 @@ export async function POST(req: Request) {
     userId = requireAuth(req);
     const rl = await checkVideoRateLimit(userId);
     if (!rl.allowed) {
+      const t = await getTranslations('errors');
       return Response.json(
-        { error: 'تجاوزت حد الطلبات — حاول مرة أخرى قريباً', remaining: rl.remaining },
+        { error: t('generic.rateLimited'), remaining: rl.remaining },
         {
           status: 429,
           headers: {
@@ -49,7 +52,7 @@ export async function POST(req: Request) {
       );
     }
     const { fields, file } = await parseRequest(req);
-    if (!fields.model || !fields.prompt) return json({ error: 'النموذج والبرومبت مطلوبان' }, 400);
+    if (!fields.model || !fields.prompt) throw new LocalizedError({ code: 'generate.modelRequired', status: 400 });
 
     const params: Record<string, unknown> = { model: fields.model, prompt: fields.prompt };
     for (const k of ['duration', 'resolution', 'aspect_ratio', 'size']) {
@@ -70,7 +73,7 @@ export async function POST(req: Request) {
         const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
         params.frame_images = [{ type: 'image_url', image_url: { url: dataUrl }, frame_type: 'first_frame' }];
       } catch {
-        return json({ error: 'فشل قراءة الصورة المرجعية' }, 400);
+        throw new LocalizedError({ code: 'generic.referenceImage', status: 400 });
       }
     }
 
@@ -84,14 +87,14 @@ export async function POST(req: Request) {
     if (projectId != null) {
       const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
       if (!proj) {
-        return json({ error: 'المشروع غير موجود أو لا تملك صلاحية الوصول إليه' }, 403);
+        throw new LocalizedError({ code: 'generate.projectNotOwned', status: 403 });
       }
     }
 
     // Server-side capability validation via @orms/model-router (never trust the client).
     const modelDef = await findModelDefinition(fields.model);
     if (!modelDef || modelDef.mediaType !== 'video') {
-      return json({ error: 'النموذج المحدد غير مدعوم لتوليد الفيديو' }, 400);
+      throw new LocalizedError({ code: 'generate.modelNotVideo', status: 400 });
     }
 
     // Server-side credit estimate (integer units). Video cost scales with duration.
@@ -111,14 +114,13 @@ export async function POST(req: Request) {
     const existing = await prisma.generation.findUnique({ where: { idempotencyKey } });
     if (existing) {
       if (existing.userId === userId) {
+        const t = await getTranslations('errors');
         return json({
           id: existing.id,
           job_id: existing.jobId,
           polling_url: existing.pollingUrl,
           status: existing.status,
-          message: 'تم استلام طلب الفيديو مسبقاً — استخدم GET /api/generate/generations/' +
-            existing.id +
-            ' للمتابعة',
+          message: t('generate.videoAlreadyAccepted', { id: existing.id }),
         });
       }
       idempotencyKey = `gen-vid:${userId}:${crypto.randomUUID()}`;
@@ -168,6 +170,8 @@ export async function POST(req: Request) {
           type: 'failed',
           dataJson: JSON.stringify({ reason: 'insufficient_credits' }),
         });
+        // Persisted `Generation.error` mirrors the worker's Arabic-in-DB pattern;
+        // the HTTP response `error` field below is localized via the catalog.
         await prisma.generation
           .update({
             where: { id: recordId },
@@ -175,8 +179,9 @@ export async function POST(req: Request) {
           })
           .catch(() => {});
         creditsReconciled = true; // nothing was reserved
+        const t = await getTranslations('errors');
         return json(
-          { id: recordId, error: 'الرصيد غير كافٍ لإتمام هذا التوليد', code: 'insufficient_credits' },
+          { id: recordId, error: t('credits.insufficient'), code: 'insufficient_credits' },
           402,
         );
       }
@@ -208,8 +213,13 @@ export async function POST(req: Request) {
         reason: 'generation failed',
       });
       creditsReconciled = true;
+      // Translate the provider error by its stable `code` via the request locale's
+      // `errors.provider.*` catalog; fall back to `messageAr` for unmapped codes.
+      const t = await getTranslations('errors');
+      const providerKey = PROVIDER_CODE_TO_CATALOG_KEY[ne.code];
+      const message = providerKey ? t(providerKey) : ne.messageAr;
       return json(
-        { id: recordId, error: ne.messageAr, code: ne.code, retryable: ne.retryable },
+        { id: recordId, error: message, code: ne.code, retryable: ne.retryable },
         ne.retryable ? 502 : 400,
       );
     }
@@ -236,12 +246,13 @@ export async function POST(req: Request) {
       });
     }
 
+    const tSuccess = await getTranslations('errors');
     return json({
       id: recordId,
       job_id: jobId,
       polling_url: pollingUrl,
       status: 'pending',
-      message: 'تم استلام طلب الفيديو — استخدم GET /api/generate/generations/' + recordId + ' للمتابعة',
+      message: tSuccess('generate.videoAccepted', { id: recordId }),
     });
   } catch (e) {
     // Outer catch: handles failures that escaped the typed branches above. If we
@@ -265,7 +276,8 @@ export async function POST(req: Request) {
       await prisma.generation
         .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
         .catch(() => {});
-      return json({ id: recordId, error: 'فشل إرسال طلب الفيديو', detail: (e as Error).message }, 502);
+      const t = await getTranslations('errors');
+      return json({ id: recordId, error: t('generate.videoFailed'), detail: (e as Error).message }, 502);
     }
     return handleError(e);
   }

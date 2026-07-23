@@ -312,16 +312,46 @@ normalize error (model-router normalizeError → Arabic message)
       minted by an authenticated endpoint (or a same-origin authenticated proxy). Design for this.
 - [ ] Tests for **unauthenticated**, **wrong-user**, **missing**, and **owner** access.
 
-### Phase 3 — localization  ⏳
+### Phase 3 — localization  ⏳ (slices 1–3 implemented & build-verified; NOT yet quality-gated)
 
-- [ ] Add **next-intl** (no equivalent i18n exists today). **Arabic default**, **English** support.
-- [ ] **Cookie-based** locale preference (prefer next-intl "without i18n routing" to avoid
-      restructuring routes into `app/[locale]/`); compute `dir` from locale.
-- [ ] Locale switcher (in `apps/web/components/DashboardShell.tsx`).
-- [ ] Centralized message catalogs (e.g. `messages/ar.json`, `messages/en.json`); migrate the
-      currently **hard-coded Arabic** strings incrementally.
-- [ ] Localized user-facing errors; correct rendering of mixed Arabic + English model names.
-- [ ] Verify **RTL and LTR** on tabs/sliders/dialogs.
+- [x] Add **next-intl** (no equivalent i18n exists today). **Arabic default**, **English** support.
+- [x] **Cookie-based** locale preference (next-intl "without i18n routing"; no `app/[locale]`
+      restructuring); compute `dir` from locale. Cookie `NEXT_LOCALE`, default `ar`, supports `["ar","en"]`.
+- [x] Locale switcher (in `apps/web/components/DashboardShell.tsx`) → `POST /api/locale`
+      (same-origin CSRF guard) + `router.refresh()`.
+- [x] Centralized message catalogs `apps/web/messages/{ar,en}.json` (366 keys each, no missing
+      translations, no duplicates). All customer-facing page strings migrated
+      (generate/dashboard/history/settings/auth + landing navbar/hero/sections/pricing/faq/footer/finalCta).
+- [x] Localized user-facing errors — server-side. Library packages (`@orms/model-router`,
+      `@orms/generation-runtime`) emit stable machine `code` strings + `retryable` flags
+      (**locale-agnostic** — no next-intl, no cookies — so the BullMQ worker shares them
+      verbatim). `apps/web/lib/http.ts` `handleError` is the single translation boundary;
+      it resolves the request locale via `getLocale`/`getTranslations` and maps by `code`
+      (`AuthError.code`, `InsufficientCreditsError.code`, `LocalizedError.code`, duck-typed
+      `NormalizedError.code`). Arabic fallback messages remain in libraries as fallback-only.
+      API routes use `messages/errors.*` for every HTTP response `error`/`message` field.
+- [ ] Verify **RTL and LTR** on tabs/sliders/dialogs. (Logical Tailwind classes converted in
+      migrated page files; runtime visual verification deferred to Phase 5 Playwright.)
+
+> **Phase 3 known limitation — `Generation.error` Arabic-in-DB (documented, not hidden):**
+> The worker (`apps/worker/src/processor.ts`, untouchable this phase) writes Arabic
+> `messageAr` into the persisted `Generation.error` column; the web routes mirror this to
+> keep **identical RunEvent** behavior. The HTTP **response** `error` field for these same
+> cases IS localized via `errors.credits.insufficient` / `errors.provider.*`. Fully
+> localizing the read path (`serializeGeneration` returns `g.error`) would require a schema
+> `error_code` column + worker coordination + serialization logic changes — out of scope.
+> A future slice should add an `error_code` column, have the worker write the stable `code`,
+> and have `serializeGeneration` translate at read time.
+
+> **Phase 3 runtime verification status — UNVERIFIED** (no browser/curl/DB run):
+> - Locale-aware API error responses (NEXT_LOCALE=en vs ar vs invalid vs absent).
+> - `<html lang dir>` flip on switcher click + persistence across refresh.
+> - `/api/locale` CSRF rejection at runtime.
+> - RTL/LTR visual rendering across 375/768/1024/1440, reduced-motion, focus rings.
+> - Mixed Arabic/English bidi rendering in a real browser.
+> These are deferred to the combined Phase 2b + Phase 3 quality gate (in progress) and
+> Phase 5 deterministic tests (Vitest/Playwright). Phase 3 is **NOT** claimed fully
+> quality-gated yet — only build + tsc + prisma validate + catalog parity pass.
 
 ### Phase 4 — Projects, Asset Library, and composer  ⏳
 

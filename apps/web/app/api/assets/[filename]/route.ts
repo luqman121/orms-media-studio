@@ -19,6 +19,7 @@ import path from 'node:path';
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { getSignedDownloadUrl } from '@/lib/storage';
 
 export const runtime = 'nodejs';
@@ -58,7 +59,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ filename: strin
     if (!owned) {
       // Same response for "not found" and "exists but owned by another user"
       // to avoid leaking the existence of cross-user assets.
-      return json({ error: 'الأصل غير موجود أو لا تملك صلاحية الوصول إليه' }, 404);
+      throw new LocalizedError({ code: 'assets.notFound', status: 404 });
     }
 
     const url = await getSignedDownloadUrl(key, ASSET_SIGNED_URL_TTL_SECONDS);

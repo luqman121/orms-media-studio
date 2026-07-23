@@ -2,6 +2,7 @@
 import { prisma } from '@orms/db';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
+import { LocalizedError } from '@orms/generation-runtime';
 import { serializeUser } from '@/lib/serialize';
 
 export const runtime = 'nodejs';
@@ -14,7 +15,7 @@ export async function GET(req: Request) {
       where: { id: userId },
       select: { id: true, email: true, name: true, createdAt: true },
     });
-    if (!user) return json({ error: 'المستخدم غير موجود' }, 404);
+    if (!user) throw new LocalizedError({ code: 'auth.userNotFound', status: 404 });
     return json({ user: serializeUser(user) });
   } catch (e) {
     return handleError(e);

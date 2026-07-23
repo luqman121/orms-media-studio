@@ -4,4 +4,5 @@
 // (apps/worker) so the video path's three callers (web route, worker, in-process
 // poller) share ONE implementation — no duplicate credit architecture.
 export * from './credits';
+export * from './errors';
 export * from './run-events';

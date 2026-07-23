@@ -14,6 +14,7 @@
 // the stream needs (see `orms-asset-security` invariant: ownership-based, never
 // object-key-based).
 import { prisma } from '@orms/db';
+import { getTranslations } from 'next-intl/server';
 import { requireAuth } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
 
@@ -38,10 +39,17 @@ export async function GET(req: Request, ctx: Ctx) {
     return handleError(e);
   }
 
+  // Resolve the request locale's error catalog up front (route-handler scope has
+  // the cookie context; the ReadableStream `start` callback runs later and shares
+  // these resolved strings via closure — no next-intl call inside the stream).
+  const t = await getTranslations('errors');
+  const notFoundMsg = t('generic.notFound');
+  const streamErrorMsg = t('sse.streamError');
+
   const { id } = await ctx.params;
   const generationId = Number(id);
   if (!Number.isInteger(generationId) || generationId <= 0) {
-    return json({ error: 'غير موجود' }, 404);
+    return json({ error: notFoundMsg }, 404);
   }
 
   // Ownership-scoped lookup: NEVER `findUnique({ where: { id } })` alone — that would
@@ -51,7 +59,7 @@ export async function GET(req: Request, ctx: Ctx) {
     select: { id: true, status: true },
   });
   if (!generation) {
-    return json({ error: 'غير موجود' }, 404);
+    return json({ error: notFoundMsg }, 404);
   }
 
   // Parse Last-Event-ID (carries the last `seq` the client saw). Absent → replay all.
@@ -163,7 +171,7 @@ export async function GET(req: Request, ctx: Ctx) {
           } catch (e) {
             // DB error mid-stream: log server-side (no secrets), Arabic client message.
             console.error('[sse] runEvent poll failed', (e as Error)?.message);
-            sendErrorAndClose('حدث خطأ أثناء بث الأحداث');
+            sendErrorAndClose(streamErrorMsg);
             return;
           }
           for (const ev of newEvents) {
@@ -180,7 +188,7 @@ export async function GET(req: Request, ctx: Ctx) {
             });
           } catch (e) {
             console.error('[sse] status re-check failed', (e as Error)?.message);
-            sendErrorAndClose('حدث خطأ أثناء بث الأحداث');
+            sendErrorAndClose(streamErrorMsg);
             return;
           }
           if (!status) {
@@ -202,7 +210,7 @@ export async function GET(req: Request, ctx: Ctx) {
               }
             } catch (e) {
               console.error('[sse] terminal drain failed', (e as Error)?.message);
-              sendErrorAndClose('حدث خطأ أثناء بث الأحداث');
+              sendErrorAndClose(streamErrorMsg);
               return;
             }
             close();
@@ -213,7 +221,7 @@ export async function GET(req: Request, ctx: Ctx) {
         // Uncaught error in the stream loop: log server-side, send a safe Arabic
         // message, never leak stack traces / secrets to the client.
         console.error('[sse] stream loop error', (e as Error)?.message);
-        sendErrorAndClose('حدث خطأ أثناء بث الأحداث');
+        sendErrorAndClose(streamErrorMsg);
       }
     },
     cancel() {

@@ -16,21 +16,25 @@ export function sign(userId: number): string {
 
 export class AuthError extends Error {
   status = 401;
-  constructor(message: string) {
+  readonly code: 'auth_required' | 'auth_invalid';
+  constructor(code: 'auth_required' | 'auth_invalid', message: string) {
     super(message);
     this.name = 'AuthError';
+    this.code = code;
   }
 }
 
 // Extract + verify the Bearer token, returning the user id. Throws AuthError on failure.
+// The Arabic `message` is a fallback; the web boundary (`handleError`) translates by
+// `code` via the `errors.auth.*` catalog keys.
 export function requireAuth(req: Request): number {
   const h = req.headers.get('authorization') || '';
   const m = h.match(/^Bearer (.+)$/);
-  if (!m) throw new AuthError('التوثيق مطلوب');
+  if (!m) throw new AuthError('auth_required', 'التوثيق مطلوب');
   try {
     const payload = jwt.verify(m[1], SECRET) as { uid: number };
     return payload.uid;
   } catch {
-    throw new AuthError('رمز غير صالح');
+    throw new AuthError('auth_invalid', 'رمز غير صالح');
   }
 }
