@@ -2,8 +2,8 @@
 // derives typed capabilities. This is the only adapter shipped in Increment 1.
 import type { ImageModel, VideoModel } from '@orms/openrouter';
 import { listImageModels, listVideoModels } from '@orms/openrouter';
-import type { MediaCapability, ModelDefinition, NormalizedError } from './types.js';
-import { estimateCredits, pricingUnit } from './credits.js';
+import type { MediaCapability, ModelDefinition, NormalizedError } from './types';
+import { estimateCredits, pricingUnit } from './credits';
 
 const PROVIDER = 'openrouter';
 

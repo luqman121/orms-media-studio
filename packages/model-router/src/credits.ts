@@ -1,6 +1,6 @@
 // Integer credit economics. All values are configurable via env with safe defaults
 // so the app boots and estimates costs even before billing is wired.
-import type { MediaCapability, MediaType } from './types.js';
+import type { MediaCapability, MediaType } from './types';
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];

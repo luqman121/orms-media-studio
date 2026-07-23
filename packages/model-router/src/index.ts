@@ -1,15 +1,15 @@
 // @orms/model-router — provider-agnostic model catalog + credit economics for ORMS.
 // Increment 1: OpenRouter only. Adapters for other providers plug into the same types.
-export * from './types.js';
-export * from './credits.js';
+export * from './types';
+export * from './credits';
 export {
   listImageModelDefinitions,
   listVideoModelDefinitions,
   normalizeError,
-} from './openrouter.js';
+} from './openrouter';
 
-import { listImageModelDefinitions, listVideoModelDefinitions } from './openrouter.js';
-import type { ModelDefinition } from './types.js';
+import { listImageModelDefinitions, listVideoModelDefinitions } from './openrouter';
+import type { ModelDefinition } from './types';
 
 /** Combined catalog (enabled models only), used by the models API + composer. */
 export async function listModelDefinitions(type?: 'image' | 'video'): Promise<{

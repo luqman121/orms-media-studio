@@ -4,6 +4,7 @@ import { prisma } from '@orms/db';
 import { sign } from '@/lib/auth';
 import { json, handleError } from '@/lib/http';
 import { serializeUser } from '@/lib/serialize';
+import { grantSignupCredits } from '@/lib/credits';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,8 @@ export async function POST(req: Request) {
       data: { email: lower, password: hash, name: name || null },
       select: { id: true, email: true, name: true, createdAt: true },
     });
+    // Grant the free signup credits (idempotent; never block registration on it).
+    await grantSignupCredits(user.id).catch((e) => console.error('[credits] signup grant failed', e));
     return json({ token: sign(user.id), user: serializeUser(user) });
   } catch (e) {
     return handleError(e);
