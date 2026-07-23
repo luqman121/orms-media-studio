@@ -55,6 +55,7 @@ async function req<T = any>(method: string, url: string, body?: Body, opts: ReqO
 export const api = {
   get: <T = any>(u: string, opts?: ReqOpts) => req<T>('GET', u, undefined, opts),
   post: <T = any>(u: string, b?: Body, opts?: ReqOpts) => req<T>('POST', u, b, opts),
+  patch: <T = any>(u: string, b?: Body) => req<T>('PATCH', u, b),
   del: <T = any>(u: string) => req<T>('DELETE', u, undefined),
   put: <T = any>(u: string, b?: Body) => req<T>('PUT', u, b),
 };

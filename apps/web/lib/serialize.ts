@@ -1,6 +1,6 @@
 // Map Prisma models back to the snake_case JSON shape the frontend/API contract
 // expects (unchanged from the Express/SQLite era). Dates → ISO 8601 strings.
-import type { Generation, User } from '@orms/db';
+import type { Asset, Generation, User } from '@orms/db';
 import { getSignedDownloadUrl } from './storage';
 
 // Signed-URL TTL for asset_urls minted by the async serializer. Short-lived per
@@ -44,6 +44,10 @@ export function serializeGeneration(g: Generation) {
     cost: g.cost,
     error: g.error,
     duration_ms: g.durationMs,
+    project_id: g.projectId,
+    estimated_credits: g.estimatedCredits,
+    reserved_credits: g.reservedCredits,
+    final_credits: g.finalCredits,
     created_at: iso(g.createdAt),
     updated_at: iso(g.updatedAt),
     asset_urls,
@@ -60,7 +64,7 @@ export function serializeGeneration(g: Generation) {
 // gallery, history page, and the generate page's post-completion fetch). The
 // output shape is backwards-compatible: clients reading `asset_url`/`asset_urls`
 // get a working URL either way (signed URL now, `/api/assets/...` path before).
-export async function serializeGenerationWithSignedUrls(g: Generation) {
+export async function serializeGenerationWithSignedUrls(g: Generation, options?: { retryable?: boolean }) {
   const keys = String(g.assetPath || '')
     .split(',')
     .filter(Boolean);
@@ -84,8 +88,41 @@ export async function serializeGenerationWithSignedUrls(g: Generation) {
     cost: g.cost,
     error: g.error,
     duration_ms: g.durationMs,
+    project_id: g.projectId,
+    estimated_credits: g.estimatedCredits,
+    reserved_credits: g.reservedCredits,
+    final_credits: g.finalCredits,
     created_at: iso(g.createdAt),
     updated_at: iso(g.updatedAt),
     asset_urls,
+    ...(options ? { retryable: options.retryable === true } : {}),
+  };
+}
+
+type LibraryAsset = Asset & {
+  generation?: { prompt: string | null; modelId: string } | null;
+  project?: { name: string } | null;
+};
+
+export async function serializeLibraryAsset(asset: LibraryAsset) {
+  const signedUrl = await getSignedDownloadUrl(asset.storageKey, SERIALIZED_ASSET_URL_TTL_SECONDS);
+  return {
+    id: asset.id,
+    generation_id: asset.generationId,
+    project_id: asset.projectId,
+    kind: asset.kind,
+    media_type: asset.mediaType,
+    name: asset.name,
+    size_bytes: asset.sizeBytes,
+    width: asset.width,
+    height: asset.height,
+    duration_ms: asset.durationMs,
+    favorite: asset.favorite,
+    prompt: asset.generation?.prompt ?? null,
+    model_id: asset.generation?.modelId ?? null,
+    project_name: asset.project?.name ?? null,
+    preview_url: signedUrl,
+    download_url: signedUrl,
+    created_at: iso(asset.createdAt),
   };
 }

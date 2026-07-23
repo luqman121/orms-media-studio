@@ -21,9 +21,12 @@ import { pollAndDownloadVideo } from '@/lib/videoPoll';
 import { checkVideoRateLimit } from '@/lib/ratelimit';
 import { reserveCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
 import { appendRunEvent } from '@/lib/run-events';
+import { assertReferenceCapability, assertSupportedControls } from '@/lib/model-validation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const VIDEO_OPTIONAL_CONTROLS = ['duration', 'resolution', 'aspect_ratio', 'size'] as const;
 
 export async function POST(req: Request) {
   const t0 = Date.now();
@@ -52,9 +55,17 @@ export async function POST(req: Request) {
       );
     }
     const { fields, file } = await parseRequest(req);
-    if (!fields.model || !fields.prompt) throw new LocalizedError({ code: 'generate.modelRequired', status: 400 });
+    if (
+      typeof fields.model !== 'string' ||
+      fields.model.trim() === '' ||
+      typeof fields.prompt !== 'string' ||
+      fields.prompt.trim() === ''
+    ) {
+      throw new LocalizedError({ code: 'generate.modelRequired', status: 400 });
+    }
+    const modelId = fields.model.trim();
 
-    const params: Record<string, unknown> = { model: fields.model, prompt: fields.prompt };
+    const params: Record<string, unknown> = { model: modelId, prompt: fields.prompt };
     for (const k of ['duration', 'resolution', 'aspect_ratio', 'size']) {
       const v = fields[k];
       if (v !== undefined && v !== '') {
@@ -67,7 +78,49 @@ export async function POST(req: Request) {
       }
     }
 
-    // Optional first-frame image for image-to-video — inline as base64, no disk write.
+    // Ownership validation: if a projectId is referenced, it must belong to this user.
+    // (projectId is reserved for Phase 4 Projects; validated defensively today.)
+    const projectIdRaw = fields.projectId;
+    let projectId: number | null = null;
+    if (projectIdRaw != null && projectIdRaw !== '') {
+      const parsedProjectId = Number(projectIdRaw);
+      if (!Number.isInteger(parsedProjectId) || parsedProjectId <= 0) {
+        throw new LocalizedError({ code: 'generate.projectInvalid', status: 400 });
+      }
+      projectId = parsedProjectId;
+    }
+    if (projectId != null) {
+      const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
+      if (!proj) {
+        throw new LocalizedError({ code: 'generate.projectNotOwned', status: 403 });
+      }
+    }
+
+    // Server-side capability validation via @orms/model-router (never trust the client).
+    let modelDef;
+    try {
+      modelDef = await findModelDefinition(modelId);
+    } catch (error) {
+      throw normalizeError(error);
+    }
+    if (!modelDef || !modelDef.enabled || modelDef.mediaType !== 'video') {
+      throw new LocalizedError({ code: 'generate.modelNotVideo', status: 400 });
+    }
+
+    const suppliedControls = VIDEO_OPTIONAL_CONTROLS.filter(
+      (control) => fields[control] !== undefined && fields[control] !== '',
+    );
+    assertSupportedControls(modelDef, suppliedControls);
+    if (file) assertReferenceCapability(modelDef);
+
+    // Server-side credit estimate (integer units). Video cost scales with duration.
+    const durationSeconds = params.duration == null ? 5 : Number(params.duration);
+    if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 20) {
+      throw new LocalizedError({ code: 'estimate.durationInvalid', status: 400 });
+    }
+
+    // Optional first-frame image for image-to-video — inline as base64 only after
+    // the model has declared image-to-video support.
     if (file) {
       try {
         const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
@@ -77,28 +130,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Ownership validation: if a projectId is referenced, it must belong to this user.
-    // (projectId is reserved for Phase 4 Projects; validated defensively today.)
-    const projectIdRaw = fields.projectId;
-    const projectId =
-      projectIdRaw != null && projectIdRaw !== '' && Number.isFinite(Number(projectIdRaw))
-        ? Number(projectIdRaw)
-        : null;
-    if (projectId != null) {
-      const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
-      if (!proj) {
-        throw new LocalizedError({ code: 'generate.projectNotOwned', status: 403 });
-      }
-    }
-
-    // Server-side capability validation via @orms/model-router (never trust the client).
-    const modelDef = await findModelDefinition(fields.model);
-    if (!modelDef || modelDef.mediaType !== 'video') {
-      throw new LocalizedError({ code: 'generate.modelNotVideo', status: 400 });
-    }
-
-    // Server-side credit estimate (integer units). Video cost scales with duration.
-    const durationSeconds = typeof params.duration === 'number' && params.duration > 0 ? params.duration : 5;
     const estimatedCredits = estimateCredits('video', { durationSeconds });
 
     // Idempotency: a client-supplied key short-circuits a duplicate submit (no re-charge,
@@ -132,8 +163,8 @@ export async function POST(req: Request) {
       data: {
         userId,
         type: 'video',
-        modelId: fields.model,
-        modelName: fields.model,
+        modelId,
+        modelName: modelDef.displayName,
         prompt: fields.prompt,
         paramsJson: JSON.stringify(params),
         status: 'pending',

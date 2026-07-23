@@ -24,21 +24,13 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { api, getToken, type ApiError } from '../../../lib/api';
+import { parseGenerationParams, type Generation, type ModelDefinition, type Project } from '../../../lib/studio-types';
 import Button from '../../../components/ui/Button';
 import Tabs from '../../../components/ui/Tabs';
 import { Field, Select } from '../../../components/ui/Field';
 import Skeleton from '../../../components/ui/Skeleton';
 
 const modelsURL = '/api/models';
-
-interface Model {
-  id: string;
-  name: string;
-  supported_parameters?: Record<string, unknown>;
-  supports_streaming?: boolean;
-  supported_resolutions?: string[];
-  supported_aspect_ratios?: string[];
-}
 
 interface ResultState {
   status: string;
@@ -83,10 +75,24 @@ function downloadAsset(url: string, name: string) {
 export default function GeneratePage() {
   const t = useTranslations('generate');
   const [mode, setMode] = useState<'image' | 'video'>('image');
-  const [models, setModels] = useState<{ images: Model[]; videos: Model[] }>({ images: [], videos: [] });
+  const [models, setModels] = useState<{ images: ModelDefinition[]; videos: ModelDefinition[] }>({ images: [], videos: [] });
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState('');
   const [selectedModelId, setSelectedModelId] = useState('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState('');
+  const [prefillNotice, setPrefillNotice] = useState('');
+  const [prefillError, setPrefillError] = useState('');
+  const [creditsBalance, setCreditsBalance] = useState<number | null>(null);
+  const [estimate, setEstimate] = useState<{
+    estimatedCredits: number;
+    balance: number;
+    remainingAfter: number;
+    canAfford: boolean;
+  } | null>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateError, setEstimateError] = useState('');
+  const [estimateEpoch, setEstimateEpoch] = useState(0);
 
   const [prompt, setPrompt] = useState('');
   const [n, setN] = useState(1);
@@ -118,17 +124,27 @@ export default function GeneratePage() {
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const filePRef = useRef<HTMLInputElement | null>(null);
+  const prefillLoadedRef = useRef(false);
 
   const curModels = mode === 'image' ? models.images : models.videos;
   const currentModel = curModels.find((m) => m.id === selectedModelId);
+
+  const refreshCredits = useCallback(async () => {
+    try {
+      const response = await api.get<{ balance: number }>('/api/users/me/credits');
+      setCreditsBalance(response.balance);
+    } catch {
+      setCreditsBalance(null);
+    }
+  }, []);
 
   const loadModels = useCallback(async () => {
     setModelsLoading(true);
     setModelsError('');
     try {
-      const d = await api.get<{ images?: Model[]; videos?: Model[] }>(modelsURL);
-      const imgs = d.images || [];
-      const vids = d.videos || [];
+      const d = await api.get<{ images?: ModelDefinition[]; videos?: ModelDefinition[] }>(modelsURL);
+      const imgs = (d.images || []).filter((model) => model.enabled);
+      const vids = (d.videos || []).filter((model) => model.enabled);
       setModels({ images: imgs, videos: vids });
       if (mode === 'image' && imgs.length && !selectedModelId) setSelectedModelId(imgs[0].id);
       else if (mode === 'video' && vids.length && !selectedModelId) setSelectedModelId(vids[0].id);
@@ -142,6 +158,10 @@ export default function GeneratePage() {
 
   useEffect(() => {
     loadModels();
+    api.get<{ data?: Project[]; projects?: Project[] }>('/api/projects')
+      .then((response) => setProjects(response.data ?? response.projects ?? []))
+      .catch(() => setProjects([]));
+    refreshCredits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -159,6 +179,99 @@ export default function GeneratePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, models]);
 
+  useEffect(() => {
+    if (modelsLoading || prefillLoadedRef.current) return;
+    prefillLoadedRef.current = true;
+    const search = new URLSearchParams(window.location.search);
+    const requestedProjectId = search.get('projectId');
+    if (requestedProjectId) setProjectId(requestedProjectId);
+    const generationId = search.get('retry') || search.get('reuse');
+    if (!generationId) return;
+    const retryIntent = search.has('retry');
+    api.get<Generation>(`/api/generate/generations/${generationId}`)
+      .then((generation) => {
+        const parsed = parseGenerationParams(generation.params_json);
+        setMode(generation.type);
+        setSelectedModelId(generation.model_id);
+        setPrompt(generation.prompt || '');
+        setProjectId(generation.project_id ? String(generation.project_id) : requestedProjectId || '');
+        setN(Number(parsed.n) || 1);
+        setResolution(String(parsed.resolution || ''));
+        setAspectRatio(String(parsed.aspect_ratio || parsed.aspectRatio || ''));
+        setQuality(String(parsed.quality || ''));
+        setOutputFormat(String(parsed.output_format || parsed.outputFormat || ''));
+        setDuration(String(parsed.duration || parsed.durationSeconds || ''));
+        setPrefillNotice(retryIntent ? t('retryPrefilled') : t('reusePrefilled'));
+      })
+      .catch((caught) => setPrefillError((caught as Error).message || t('prefillError')));
+  }, [modelsLoading, t]);
+
+  function supportsParam(...names: string[]) {
+    const supported = currentModel?.supportedParams.map((value) => value.toLowerCase().replaceAll('-', '_')) ?? [];
+    return names.some((name) => supported.includes(name.toLowerCase().replaceAll('-', '_')));
+  }
+
+  const supportsStream = mode === 'image' && Boolean(currentModel?.supportsStreaming);
+  const supportsReference = mode === 'image'
+    ? currentModel?.capabilities.includes('image-to-image')
+    : currentModel?.capabilities.includes('image-to-video');
+  const supportsCount = mode === 'image' && supportsParam('n', 'count');
+  const supportsDuration = mode === 'video' && supportsParam('duration', 'duration_seconds');
+  const supportedResolutions = currentModel?.limits.supportedResolutions ?? [];
+  const supportedRatios = currentModel?.limits.supportedAspectRatios ?? [];
+
+  useEffect(() => {
+    if (!currentModel) return;
+    if (!supportsCount) setN(1);
+    else if (currentModel.limits.maxImages && n > currentModel.limits.maxImages) setN(currentModel.limits.maxImages);
+    if (!supportsDuration) setDuration('');
+    if (!supportsParam('resolution') || !supportedResolutions.includes(resolution)) setResolution('');
+    if (!supportsParam('aspect_ratio', 'aspectRatio') || !supportedRatios.includes(aspectRatio)) setAspectRatio('');
+    if (!supportsParam('quality')) setQuality('');
+    if (!supportsParam('output_format', 'outputFormat')) setOutputFormat('');
+    if (!supportsStream) setUseStreaming(false);
+    if (!supportsReference && referenceImage) clearRef();
+    // The selected model is the authority for valid controls. These derived
+    // values deliberately re-evaluate only when its id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentModel?.id]);
+
+  useEffect(() => {
+    if (!selectedModelId) {
+      setEstimate(null);
+      setEstimateError('');
+      return;
+    }
+    let alive = true;
+    setEstimate(null);
+    setEstimateError('');
+    setEstimateLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const body: Record<string, unknown> = { modelId: selectedModelId };
+        if (supportsCount) body.count = n;
+        if (supportsDuration && duration) body.durationSeconds = Number(duration);
+        const response = await api.post<{
+          estimatedCredits: number;
+          balance: number;
+          remainingAfter: number;
+          canAfford: boolean;
+        }>('/api/generate/estimate', body);
+        if (!alive) return;
+        setEstimate(response);
+        setCreditsBalance(response.balance);
+      } catch (caught) {
+        if (alive) setEstimateError((caught as Error).message || t('estimateError'));
+      } finally {
+        if (alive) setEstimateLoading(false);
+      }
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [duration, estimateEpoch, n, selectedModelId, supportsCount, supportsDuration, t]);
+
   function onFileSelected(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -172,8 +285,6 @@ export default function GeneratePage() {
     setRefPreview('');
     if (filePRef.current) filePRef.current.value = '';
   }
-
-  const supportsStream = mode === 'image' && !!currentModel?.supports_streaming;
 
   function toggleIn(list: string[], kw: string): string[] {
     return list.includes(kw) ? list.filter((k) => k !== kw) : [...list, kw];
@@ -255,12 +366,13 @@ export default function GeneratePage() {
     if (referenceImage) fd.append('image', referenceImage);
     fd.append('model', selectedModelId);
     fd.append('prompt', finalPrompt);
-    if (n) fd.append('n', String(n));
+    if (supportsCount && n) fd.append('n', String(n));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
     if (quality) fd.append('quality', quality);
     if (outputFormat) fd.append('output_format', outputFormat);
     if (useStreaming) fd.append('stream', 'true');
+    if (projectId) fd.append('projectId', projectId);
 
     try {
       if (useStreaming && supportsStream) {
@@ -324,6 +436,8 @@ export default function GeneratePage() {
     } finally {
       setRunning(false);
       setPartialProgress(0);
+      refreshCredits();
+      setEstimateEpoch((value) => value + 1);
     }
   }
 
@@ -355,6 +469,7 @@ export default function GeneratePage() {
     if (duration) fd.append('duration', String(duration));
     if (resolution) fd.append('resolution', resolution);
     if (aspectRatio) fd.append('aspect_ratio', aspectRatio);
+    if (projectId) fd.append('projectId', projectId);
 
     try {
       const r = await api.post<{ id: number }>('/api/generate/video', fd);
@@ -371,6 +486,8 @@ export default function GeneratePage() {
             setResult({ status: 'completed', assets, cost: detail.cost, id: genId, at: Date.now() });
             setPollingText('');
             setRunning(false);
+            refreshCredits();
+            setEstimateEpoch((value) => value + 1);
           } else if (p.status === 'failed') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
@@ -385,6 +502,8 @@ export default function GeneratePage() {
             setError(reason ? t('errVideoFailedReason', { reason }) : t('errVideoFailed'));
             setPollingText('');
             setRunning(false);
+            refreshCredits();
+            setEstimateEpoch((value) => value + 1);
           } else {
             setPollingText(p.status === 'in_progress' ? t('pollInProgress') : t('pollPending'));
           }
@@ -399,6 +518,8 @@ export default function GeneratePage() {
       setError(detail && detail !== base ? `${base} — ${detail}` : base);
       setRunning(false);
       setPollingText('');
+      refreshCredits();
+      setEstimateEpoch((value) => value + 1);
     }
   }
 
@@ -415,14 +536,7 @@ export default function GeneratePage() {
     else runVideo();
   }
 
-  const supportedKeys = currentModel?.supported_parameters ? Object.keys(currentModel.supported_parameters) : [];
-  const videoResolutions = currentModel?.supported_resolutions || [];
-  const videoRatios = currentModel?.supported_aspect_ratios || [];
-
-  const commonRatios = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'];
-  const imageResolutions = ['512', '1K', '2K', '4K'];
-  const videoResolutionLabels = videoResolutions.length ? videoResolutions : ['720p', '1080p', '480p', '4K'];
-  const ratioOptions = mode === 'video' ? (videoRatios.length ? videoRatios : commonRatios) : commonRatios;
+  const supportedKeys = currentModel?.supportedParams ?? [];
 
   const showSuccess = !!result && !running;
 

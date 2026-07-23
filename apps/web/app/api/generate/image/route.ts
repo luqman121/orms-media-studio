@@ -22,6 +22,11 @@ import { checkImageRateLimit } from '@/lib/ratelimit';
 import { reserveCredits, settleCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
 import { appendRunEvent } from '@/lib/run-events';
 import { serializeGeneration } from '@/lib/serialize';
+import {
+  assertReferenceCapability,
+  assertStreamingCapability,
+  assertSupportedControls,
+} from '@/lib/model-validation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +46,16 @@ function buildParams(fields: Record<string, any>): Record<string, unknown> {
   }
   return params;
 }
+
+const IMAGE_OPTIONAL_CONTROLS = [
+  'n',
+  'resolution',
+  'aspect_ratio',
+  'quality',
+  'output_format',
+  'background',
+  'seed',
+] as const;
 
 // Detect an image's media type from magic bytes (Gemini sometimes returns JPEG under
 // image/png), falling back to the provider-declared media_type. Returns the media type
@@ -80,21 +95,17 @@ export async function POST(req: Request) {
       );
     }
     const { fields, file } = await parseRequest(req);
-    if (!fields.model || !fields.prompt) {
+    if (
+      typeof fields.model !== 'string' ||
+      fields.model.trim() === '' ||
+      typeof fields.prompt !== 'string' ||
+      fields.prompt.trim() === ''
+    ) {
       throw new LocalizedError({ code: 'generate.modelRequired', status: 400 });
     }
+    const modelId = fields.model.trim();
     const wantStream = fields.stream === true || fields.stream === 'true';
-    const params = buildParams(fields);
-
-    // Optional reference image — inline as base64 data URL, no disk write.
-    if (file) {
-      try {
-        const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
-        params.input_references = [{ type: 'image_url', image_url: { url: dataUrl } }];
-      } catch {
-        throw new LocalizedError({ code: 'generic.referenceImage', status: 400 });
-      }
-    }
+    const params = buildParams({ ...fields, model: modelId });
 
     // ---- Shared durable preamble: capability + ownership + estimate + reserve ----
     // Both the SSE stream path and the non-stream path run through this so the credit
@@ -105,10 +116,14 @@ export async function POST(req: Request) {
     // Ownership validation: if a projectId is referenced, it must belong to this user.
     // (projectId is reserved for Phase 4 Projects; validated defensively today.)
     const projectIdRaw = fields.projectId;
-    const projectId =
-      projectIdRaw != null && projectIdRaw !== '' && Number.isFinite(Number(projectIdRaw))
-        ? Number(projectIdRaw)
-        : null;
+    let projectId: number | null = null;
+    if (projectIdRaw != null && projectIdRaw !== '') {
+      const parsedProjectId = Number(projectIdRaw);
+      if (!Number.isInteger(parsedProjectId) || parsedProjectId <= 0) {
+        throw new LocalizedError({ code: 'generate.projectInvalid', status: 400 });
+      }
+      projectId = parsedProjectId;
+    }
     if (projectId != null) {
       const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
       if (!proj) {
@@ -117,13 +132,48 @@ export async function POST(req: Request) {
     }
 
     // Server-side capability validation via @orms/model-router (never trust the client).
-    const modelDef = await findModelDefinition(fields.model);
-    if (!modelDef || modelDef.mediaType !== 'image') {
+    let modelDef;
+    try {
+      modelDef = await findModelDefinition(modelId);
+    } catch (error) {
+      throw normalizeError(error);
+    }
+    if (!modelDef || !modelDef.enabled || modelDef.mediaType !== 'image') {
       throw new LocalizedError({ code: 'generate.modelNotImage', status: 400 });
     }
 
-    // Server-side credit estimate (integer units). `n` defaults to 1.
-    const count = typeof params.n === 'number' && params.n > 0 ? Math.floor(params.n) : 1;
+    const suppliedControls = IMAGE_OPTIONAL_CONTROLS.filter(
+      (control) => fields[control] !== undefined && fields[control] !== '',
+    );
+    assertSupportedControls(modelDef, suppliedControls);
+    if (wantStream) assertStreamingCapability(modelDef);
+    if (file) assertReferenceCapability(modelDef);
+
+    // Server-side credit estimate (integer units). `n` defaults to 1 and is
+    // constrained to the same product range exposed by the estimate endpoint.
+    const count = params.n == null ? 1 : Number(params.n);
+    if (!Number.isInteger(count) || count < 1 || count > 4) {
+      throw new LocalizedError({ code: 'estimate.countInvalid', status: 400 });
+    }
+    if (params.seed != null && !Number.isInteger(params.seed)) {
+      throw new LocalizedError({
+        code: 'generate.parameterInvalid',
+        params: { parameter: 'seed' },
+        status: 400,
+      });
+    }
+
+    // Optional reference image — inline as base64 only after the selected model
+    // has authoritatively declared image-to-image support.
+    if (file) {
+      try {
+        const dataUrl = orouter.bufferToDataUrl(file.buffer, file.mimetype);
+        params.input_references = [{ type: 'image_url', image_url: { url: dataUrl } }];
+      } catch {
+        throw new LocalizedError({ code: 'generic.referenceImage', status: 400 });
+      }
+    }
+
     const estimatedCredits = estimateCredits('image', { count });
 
     // Idempotency: a client-supplied key short-circuits a duplicate submit (no re-charge,
@@ -150,8 +200,8 @@ export async function POST(req: Request) {
       data: {
         userId,
         type: 'image',
-        modelId: fields.model,
-        modelName: fields.model,
+        modelId,
+        modelName: modelDef.displayName,
         prompt: fields.prompt,
         paramsJson: JSON.stringify(params),
         status: 'pending',

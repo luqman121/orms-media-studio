@@ -20,6 +20,7 @@ export interface ModelLimits {
   maxDurationSeconds?: number;
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
+  supportedSizes?: string[];
 }
 
 export interface ModelPricing {

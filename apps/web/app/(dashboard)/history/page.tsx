@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Trash2, Download, Loader2, Image as ImageIcon, Video as VideoIcon, Sparkles, AlertCircle } from 'lucide-react';
+import { Trash2, Download, Loader2, Image as ImageIcon, Video as VideoIcon, Sparkles, AlertCircle, Eye } from 'lucide-react';
 import { api } from '../../../lib/api';
 import Card from '../../../components/ui/Card';
 import Badge from '../../../components/ui/Badge';
@@ -114,18 +114,20 @@ export default function HistoryPage() {
             return (
               <Card key={it.id} hover className="flex flex-col gap-2.5 p-2.5">
                 <div className="relative aspect-[4/3] overflow-hidden rounded-mdx bg-bg-950">
-                  {previewUrl ? (
-                    isVideo ? (
-                      <video src={previewUrl} muted playsInline className="h-full w-full object-cover" />
+                  <Link href={`/history/${it.id}`} className="block h-full w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500" aria-label={t('openDetails')}>
+                    {previewUrl ? (
+                      isVideo ? (
+                        <video src={previewUrl} muted playsInline className="h-full w-full object-cover" />
+                      ) : (
+                        <img src={previewUrl} alt={it.prompt} className="h-full w-full object-cover" />
+                      )
                     ) : (
-                      <img src={previewUrl} alt={it.prompt} className="h-full w-full object-cover" />
-                    )
-                  ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-text-500">
-                      {busy ? <Loader2 size={24} className="spin-slow" /> : <ImageIcon size={24} />}
-                      <div className="text-xs">{(['completed', 'pending', 'in_progress', 'failed'].includes(it.status) ? t(`status.${it.status}`) : it.status)}</div>
-                    </div>
-                  )}
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-text-500">
+                        {busy ? <Loader2 size={24} className="spin-slow" /> : <ImageIcon size={24} />}
+                        <div className="text-xs">{(['completed', 'pending', 'in_progress', 'failed'].includes(it.status) ? t(`status.${it.status}`) : it.status)}</div>
+                      </div>
+                    )}
+                  </Link>
                   <div className="absolute end-2 top-2">
                     <Badge tone={isVideo ? 'cyan' : 'default'}>
                       {isVideo ? <VideoIcon size={11} /> : <ImageIcon size={11} />}
@@ -145,6 +147,14 @@ export default function HistoryPage() {
                     {new Date(it.created_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}
                   </span>
                   <div className="flex gap-1.5">
+                    <Link
+                      href={`/history/${it.id}`}
+                      title={t('openDetails')}
+                      aria-label={t('openDetails')}
+                      className="rounded-mdx border border-border-700 bg-surface-800 p-1.5 text-text-100 transition-colors hover:border-border-600"
+                    >
+                      <Eye size={14} />
+                    </Link>
                     {previewUrl && it.status === 'completed' && (
                       <button
                         onClick={() => downloadAsset(previewUrl, `orms-${it.id}${isVideo ? '.mp4' : '.png'}`)}

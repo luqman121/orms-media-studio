@@ -12,6 +12,19 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
+function retryableFromFailedEvent(status: string, dataJson: string | null | undefined): boolean {
+  if (status !== 'failed' || !dataJson) return false;
+  try {
+    const data = JSON.parse(dataJson) as {
+      retryable?: unknown;
+      error?: { retryable?: unknown };
+    };
+    return data.retryable === true || data.error?.retryable === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const userId = requireAuth(req);
@@ -20,7 +33,19 @@ export async function GET(req: Request, ctx: Ctx) {
     if (!Number.isInteger(generationId) || generationId <= 0) throw new LocalizedError({ code: 'generic.notFound', status: 404 });
     const row = await prisma.generation.findFirst({ where: { id: generationId, userId } });
     if (!row) throw new LocalizedError({ code: 'generic.notFound', status: 404 });
-    return json(await serializeGenerationWithSignedUrls(row));
+    const latestFailedEvent =
+      row.status === 'failed'
+        ? await prisma.runEvent.findFirst({
+            where: { generationId: row.id, userId, type: 'failed' },
+            orderBy: { seq: 'desc' },
+            select: { dataJson: true },
+          })
+        : null;
+    return json(
+      await serializeGenerationWithSignedUrls(row, {
+        retryable: retryableFromFailedEvent(row.status, latestFailedEvent?.dataJson),
+      }),
+    );
   } catch (e) {
     return handleError(e);
   }

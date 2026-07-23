@@ -32,19 +32,24 @@ function imageToDefinition(m: ImageModel): ModelDefinition {
 }
 
 function videoToDefinition(m: VideoModel): ModelDefinition {
+  const supportedParams = m.allowed_passthrough_parameters || [];
+  const normalizedParams = supportedParams.map((param) => param.toLowerCase().replace(/[-\s]/g, '_'));
+  const supportsReferenceImage = normalizedParams.some((param) =>
+    ['frame_images', 'first_frame', 'image', 'image_url', 'input_reference', 'input_references'].includes(param),
+  );
   return {
     id: m.id,
     provider: PROVIDER,
     displayName: m.name || m.id,
     mediaType: 'video',
-    // Every OpenRouter video model here accepts a first-frame image (frame_images).
-    capabilities: ['text-to-video', 'image-to-video'],
-    supportedParams: m.allowed_passthrough_parameters || [],
+    capabilities: supportsReferenceImage ? ['text-to-video', 'image-to-video'] : ['text-to-video'],
+    supportedParams,
     supportsStreaming: false,
     pricing: { unit: pricingUnit('video'), estimatedCredits: estimateCredits('video') },
     limits: {
       supportedAspectRatios: m.supported_aspect_ratios || [],
       supportedResolutions: m.supported_resolutions || [],
+      supportedSizes: m.supported_sizes || [],
     },
     enabled: true,
   };

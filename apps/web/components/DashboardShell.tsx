@@ -9,7 +9,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations, useLocale } from 'next-intl';
-import { Home, Wand2, Images, Settings, LogOut, Menu, X, Plus, ChevronLeft } from 'lucide-react';
+import { Home, Wand2, Images, Settings, LogOut, Menu, X, Plus, ChevronLeft, FolderKanban, History } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Logo from './ui/Logo';
 import { SUPPORTED_LOCALES, type Locale } from '../i18n/locale';
@@ -19,7 +19,9 @@ import { SUPPORTED_LOCALES, type Locale } from '../i18n/locale';
 const navItems = [
   { to: '/dashboard', key: 'dashboard', icon: Home },
   { to: '/generate', key: 'generate', icon: Wand2 },
-  { to: '/history', key: 'history', icon: Images },
+  { to: '/projects', key: 'projects', icon: FolderKanban },
+  { to: '/assets', key: 'assets', icon: Images },
+  { to: '/history', key: 'history', icon: History },
   { to: '/settings', key: 'settings', icon: Settings },
 ] as const;
 
@@ -27,6 +29,8 @@ const navItems = [
 const crumbKeys: Record<string, string> = {
   '/dashboard': 'crumb_dashboard',
   '/generate': 'crumb_generate',
+  '/projects': 'crumb_projects',
+  '/assets': 'crumb_assets',
   '/history': 'crumb_history',
   '/settings': 'crumb_settings',
 };
@@ -37,7 +41,7 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
     <nav className="flex flex-1 flex-col gap-1 p-3">
       {navItems.map((it) => {
         const Icon = it.icon;
-        const active = pathname === it.to;
+        const active = pathname === it.to || pathname.startsWith(`${it.to}/`);
         return (
           <Link
             key={it.to}
@@ -127,7 +131,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     router.push('/auth');
   }
 
-  const crumbKey = crumbKeys[pathname];
+  const crumbKey = Object.entries(crumbKeys).find(([route]) => pathname === route || pathname.startsWith(`${route}/`))?.[1];
   const crumb = crumbKey ? t_shell(crumbKey) : '';
 
   const SidebarInner = (
