@@ -11,6 +11,11 @@ export interface VideoJobData {
   generationId: number;
   openrouterId: string;
   t0: number;
+  // Carried from the web route's reservation so the worker can settle/refund without
+  // re-reading the Generation row. These are AUTHORITATIVE for credit reconciliation.
+  userId: number;
+  reservedCredits: number;
+  idempotencyKey: string;
 }
 
 function parseRedisUrl(url: string): Record<string, unknown> {
@@ -47,7 +52,14 @@ function getQueue(): Queue {
   return _queue;
 }
 
-export async function enqueueVideoJob(generationId: number, openrouterId: string, t0: number): Promise<void> {
-  const data: VideoJobData = { generationId, openrouterId, t0 };
+export async function enqueueVideoJob(
+  generationId: number,
+  openrouterId: string,
+  t0: number,
+  userId: number,
+  reservedCredits: number,
+  idempotencyKey: string,
+): Promise<void> {
+  const data: VideoJobData = { generationId, openrouterId, t0, userId, reservedCredits, idempotencyKey };
   await getQueue().add('poll', data);
 }

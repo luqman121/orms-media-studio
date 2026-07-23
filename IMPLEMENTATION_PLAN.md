@@ -29,8 +29,24 @@ This is the authoritative implementation handoff for **Increment 1** of the ORMS
 | Default branch | `main` (this handoff is committed here) |
 | `main` HEAD when this plan was written | `e6ac556` — "Add explicit install/build/start commands to deploy.json" |
 | Implementation branch | **`feat/complete-generative-studio`** |
-| Implementation branch HEAD | `36ec947` |
+| Implementation branch HEAD | `36ec947` (Phase 2a) → `9f9cb67` (skills config) |
 | Working tree when plan generated | **clean** (confirmed via `git status`) |
+
+> **Pre-implementation baseline (recorded before Phase 2b):**
+> `npm run build` on `feat/complete-generative-studio` @ `9f9cb67` — **PASS**.
+> Verified: Prisma Client generation, Next.js production compilation, TypeScript
+> validation, static page generation, and production build finalization all passed.
+> Non-blocking warnings observed (do **not** address unless required):
+> 1. Prisma `package.json` config deprecated (→ `prisma.config.ts` eventually).
+> 2. OpenTelemetry/Sentry dynamic-dependency bundling warnings (build still succeeded).
+> 3. BullMQ dynamic-dependency warning via `apps/web/lib/queue.ts` →
+>    `apps/web/app/api/generate/video/route.ts` — **VERIFIED (explorer)**: the web app only
+>    `new Queue('video-poll').add(...)` (enqueue); the sole BullMQ `Worker` consumer is
+>    `apps/worker/src/index.ts:45` on the same `'video-poll'` queue. No second queue
+>    architecture. The warning is just BullMQ being bundled into the web route chunk.
+> 4. `JWT_SECRET` missing at build → auth used an insecure dev fallback — treat as a
+>    **required runtime/security config check**; never commit a real secret.
+> Baseline is clean enough to begin Phase 2b.
 
 **Commits that contain the real Increment 1 work (on the feature branch, NOT on main):**
 

@@ -3,12 +3,23 @@
 // reference image (img2img) sent as multipart/form-data.
 // Phase 4: generated images are stored in R2 (putObject); reference image is inlined
 // as a base64 data URL — never written to disk.
+//
+// Phase 2b (Slice 1): the NON-STREAM path is wired to the durable, server-authoritative
+// lifecycle — server-side capability validation, server-side credit estimate, idempotent
+// Generation creation, durable RunEvents with monotonic seq, exactly-once reserve/settle
+// (or refund on failure), and normalized Asset rows (alongside the legacy assetPath).
+// The SSE stream path is intentionally untouched in this slice (a later slice replaces
+// its in-memory events with RunEvent-sourced durable SSE).
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
+import { estimateCredits, findModelDefinition, normalizeError, usdToCredits } from '@orms/model-router';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
 import { putObject } from '@/lib/storage';
 import { checkImageRateLimit } from '@/lib/ratelimit';
+import { reserveCredits, settleCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
+import { appendRunEvent } from '@/lib/run-events';
+import { serializeGeneration } from '@/lib/serialize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,11 +40,29 @@ function buildParams(fields: Record<string, any>): Record<string, unknown> {
   return params;
 }
 
+// Detect an image's media type from magic bytes (Gemini sometimes returns JPEG under
+// image/png), falling back to the provider-declared media_type. Returns the media type
+// and a matching file extension.
+function detectImageFormat(buf: Buffer, declared?: string): { mediaType: string; ext: string } {
+  const isJpeg = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8;
+  const isPng = buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  if (isJpeg) return { mediaType: 'image/jpeg', ext: '.jpg' };
+  if (isPng) return { mediaType: 'image/png', ext: '.png' };
+  if (declared === 'image/webp') return { mediaType: 'image/webp', ext: '.webp' };
+  if (declared === 'image/svg+xml') return { mediaType: 'image/svg+xml', ext: '.svg' };
+  return { mediaType: declared || 'image/png', ext: '.png' };
+}
+
 export async function POST(req: Request) {
   const t0 = Date.now();
+  let userId: number | null = null;
   let recordId: number | null = null;
+  // Credit reconciliation guard for the outer catch: once we reserve credits we MUST
+  // either settle or refund exactly once before returning. These track that obligation.
+  let reservedCredits = 0;
+  let creditsReconciled = false;
   try {
-    const userId = requireAuth(req);
+    userId = requireAuth(req);
     const rl = await checkImageRateLimit(userId);
     if (!rl.allowed) {
       return Response.json(
@@ -64,6 +93,73 @@ export async function POST(req: Request) {
       }
     }
 
+    // ---- SSE stream path: unchanged in this slice ----
+    // The durable lifecycle (capability validation, credit reservation, RunEvents) is
+    // wired for the non-stream path only here; a later slice upgrades the stream path
+    // to RunEvent-sourced durable SSE. Keeping the stream create identical to before.
+    if (wantStream) {
+      const record = await prisma.generation.create({
+        data: {
+          userId,
+          type: 'image',
+          modelId: fields.model,
+          modelName: fields.model,
+          prompt: fields.prompt,
+          paramsJson: JSON.stringify(params),
+          status: 'pending',
+        },
+        select: { id: true },
+      });
+      recordId = record.id;
+      return streamImage(recordId, params, t0);
+    }
+
+    // ---- Non-stream path: durable, server-authoritative lifecycle ----
+
+    // Ownership validation: if a projectId is referenced, it must belong to this user.
+    // (projectId is reserved for Phase 4 Projects; validated defensively today.)
+    const projectIdRaw = fields.projectId;
+    const projectId =
+      projectIdRaw != null && projectIdRaw !== '' && Number.isFinite(Number(projectIdRaw))
+        ? Number(projectIdRaw)
+        : null;
+    if (projectId != null) {
+      const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
+      if (!proj) {
+        return json({ error: 'المشروع غير موجود أو لا تملك صلاحية الوصول إليه' }, 403);
+      }
+    }
+
+    // Server-side capability validation via @orms/model-router (never trust the client).
+    const modelDef = await findModelDefinition(fields.model);
+    if (!modelDef || modelDef.mediaType !== 'image') {
+      return json({ error: 'النموذج المحدد غير مدعوم لتوليد الصور' }, 400);
+    }
+
+    // Server-side credit estimate (integer units). `n` defaults to 1.
+    const count = typeof params.n === 'number' && params.n > 0 ? Math.floor(params.n) : 1;
+    const estimatedCredits = estimateCredits('image', { count });
+
+    // Idempotency: a client-supplied key short-circuits a duplicate submit (no re-charge,
+    // no re-submit). If absent, mint a server-side key scoped to the user.
+    const clientKey = req.headers.get('idempotency-key');
+    let idempotencyKey =
+      clientKey && clientKey.trim() !== '' ? clientKey.trim() : `gen-img:${userId}:${crypto.randomUUID()}`;
+
+    // Resolve an existing generation by idempotency key. If it belongs to this user,
+    // return its current serialized state without re-charging. If the key collides with
+    // another user's generation (extremely unlikely), mint a fresh server key so the
+    // unique constraint isn't violated.
+    const existing = await prisma.generation.findUnique({ where: { idempotencyKey } });
+    if (existing) {
+      if (existing.userId === userId) {
+        return json(serializeGeneration(existing), 200);
+      }
+      idempotencyKey = `gen-img:${userId}:${crypto.randomUUID()}`;
+    }
+
+    // Create the Generation row (status: pending). estimatedCredits is set now;
+    // reservedCredits is filled after a successful reservation.
     const record = await prisma.generation.create({
       data: {
         userId,
@@ -73,44 +169,123 @@ export async function POST(req: Request) {
         prompt: fields.prompt,
         paramsJson: JSON.stringify(params),
         status: 'pending',
+        provider: 'openrouter',
+        idempotencyKey,
+        estimatedCredits,
+        projectId: projectId ?? undefined,
       },
       select: { id: true },
     });
     recordId = record.id;
 
-    if (wantStream) {
-      return streamImage(recordId, params, t0);
+    await appendRunEvent({ generationId: recordId, userId, type: 'created' });
+
+    // Reserve credits before submitting to the provider. On insufficient balance, mark
+    // the generation failed (Arabic), persist a failure RunEvent, and return 402 — no
+    // refund is needed because nothing was reserved.
+    try {
+      await reserveCredits(userId, estimatedCredits, {
+        generationId: recordId,
+        idempotencyKey,
+      });
+      reservedCredits = estimatedCredits;
+      await prisma.generation.update({
+        where: { id: recordId },
+        data: { reservedCredits },
+      });
+      await appendRunEvent({ generationId: recordId, userId, type: 'queued' });
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        await appendRunEvent({
+          generationId: recordId,
+          userId,
+          type: 'failed',
+          dataJson: JSON.stringify({ reason: 'insufficient_credits' }),
+        });
+        await prisma.generation
+          .update({
+            where: { id: recordId },
+            data: { status: 'failed', error: 'الرصيد غير كافٍ لإتمام هذا التوليد' },
+          })
+          .catch(() => {});
+        creditsReconciled = true; // nothing was reserved
+        return json(
+          { id: recordId, error: 'الرصيد غير كافٍ لإتمام هذا التوليد', code: 'insufficient_credits' },
+          402,
+        );
+      }
+      throw e;
     }
 
-    // Non-streaming: generate, detect format, upload to R2.
-    const result = await orouter.generateImage(params);
+    // Submit to the provider through the EXISTING path (signature/behavior unchanged).
+    let result;
+    try {
+      result = await orouter.generateImage(params);
+    } catch (e) {
+      const ne = normalizeError(e);
+      await prisma.generation
+        .update({ where: { id: recordId }, data: { status: 'failed', error: ne.messageAr } })
+        .catch(() => {});
+      await appendRunEvent({
+        generationId: recordId,
+        userId,
+        type: 'failed',
+        dataJson: JSON.stringify({ error: { code: ne.code, retryable: ne.retryable } }),
+      });
+      await refundCredits(userId, {
+        generationId: recordId,
+        amount: reservedCredits,
+        idempotencyKey,
+        reason: 'generation failed',
+      });
+      creditsReconciled = true;
+      return json(
+        { id: recordId, error: ne.messageAr, code: ne.code, retryable: ne.retryable },
+        ne.retryable ? 502 : 400,
+      );
+    }
+
+    // Process the result: upload each image to R2 and collect both the legacy
+    // assetPath entries and normalized Asset rows.
     const items = result.data || [];
     const saved: { filename: string; media_type: string }[] = [];
+    const assetRows: {
+      userId: number;
+      generationId: number;
+      kind: string;
+      storageKey: string;
+      mediaType: string;
+      name: string;
+    }[] = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       if (!it.b64_json) continue;
       const buf = Buffer.from(it.b64_json, 'base64');
-      // Detect format from magic bytes — Gemini sometimes returns JPEG under image/png.
-      const isJpeg = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8;
-      const isPng = buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-      let mediaType: string, ext: string;
-      if (isJpeg) {
-        mediaType = 'image/jpeg'; ext = '.jpg';
-      } else if (isPng) {
-        mediaType = 'image/png'; ext = '.png';
-      } else if (it.media_type === 'image/webp') {
-        mediaType = 'image/webp'; ext = '.webp';
-      } else if (it.media_type === 'image/svg+xml') {
-        mediaType = 'image/svg+xml'; ext = '.svg';
-      } else {
-        mediaType = it.media_type || 'image/png'; ext = '.png';
-      }
+      const { mediaType, ext } = detectImageFormat(buf, it.media_type);
       const fname = `img_${recordId}_${i}${ext}`;
       await putObject(fname, buf, mediaType);
       saved.push({ filename: fname, media_type: mediaType });
+      assetRows.push({
+        userId,
+        generationId: recordId,
+        kind: 'image',
+        storageKey: fname,
+        mediaType,
+        name: fname,
+      });
     }
     if (saved.length === 0) throw new Error('لم يُرجع الموديل أي صورة');
+
+    // Persist normalized Asset rows (kept alongside the legacy assetPath for back-compat).
+    if (assetRows.length > 0) {
+      await prisma.asset.createMany({ data: assetRows });
+    }
+
     const cost = result.usage?.cost ? String(result.usage.cost) : null;
+    // Final cost in integer credits: prefer the provider-reported USD cost; fall back to
+    // the pre-flight estimate when the provider reports none.
+    const finalCredits = usdToCredits(result.usage?.cost) || estimatedCredits;
+
     await prisma.generation.update({
       where: { id: recordId },
       data: {
@@ -119,7 +294,24 @@ export async function POST(req: Request) {
         assetMediaType: saved.map((s) => s.media_type).join(','),
         cost,
         durationMs: Date.now() - t0,
+        finalCredits,
       },
+    });
+
+    // Settle credits exactly once: reconcile the reservation against the real cost.
+    await settleCredits(userId, {
+      generationId: recordId,
+      reservedCredits,
+      finalCredits,
+      idempotencyKey,
+    });
+    creditsReconciled = true;
+
+    await appendRunEvent({
+      generationId: recordId,
+      userId,
+      type: 'completed',
+      dataJson: JSON.stringify({ assets: saved }),
     });
 
     return json({
@@ -131,7 +323,24 @@ export async function POST(req: Request) {
       usage: result.usage,
     });
   } catch (e) {
-    if (recordId != null) {
+    // Outer catch: handles failures that escaped the typed branches above (e.g. R2
+    // upload, asset write, or settle). If we reserved credits but never reconciled,
+    // refund exactly once and persist a failure RunEvent.
+    if (recordId != null && userId != null) {
+      if (reservedCredits > 0 && !creditsReconciled) {
+        await refundCredits(userId, {
+          generationId: recordId,
+          amount: reservedCredits,
+          idempotencyKey: `recover:${recordId}`,
+          reason: 'generation failed (uncaught)',
+        }).catch(() => {});
+      }
+      await appendRunEvent({
+        generationId: recordId,
+        userId,
+        type: 'failed',
+        dataJson: JSON.stringify({ error: (e as Error)?.message ?? 'unknown' }),
+      }).catch(() => {});
       await prisma.generation
         .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
         .catch(() => {});

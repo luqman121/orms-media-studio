@@ -2,22 +2,39 @@
 // Submits an async video job to OpenRouter, then enqueues a 'video-poll' BullMQ job
 // for the worker process (apps/worker) to poll and download.
 // Falls back to the in-process fire-and-forget poller when REDIS_URL is not set (dev).
+//
+// Phase 2b (Slice 2): the durable, server-authoritative lifecycle is wired here —
+// server-side capability validation, server-side credit estimate, idempotent
+// Generation creation, durable RunEvents with monotonic seq, exactly-once reserve
+// (and refund on failure), and dispatch to the worker / in-process poller which each
+// settle on success or refund on failure. The worker and poller write IDENTICAL
+// RunEvents through @orms/generation-runtime.
 import * as orouter from '@orms/openrouter';
 import { prisma } from '@orms/db';
+import { estimateCredits, findModelDefinition, normalizeError } from '@orms/model-router';
 import { requireAuth } from '@/lib/auth';
 import { parseRequest, json, handleError } from '@/lib/http';
 import { enqueueVideoJob } from '@/lib/queue';
 import { pollAndDownloadVideo } from '@/lib/videoPoll';
 import { checkVideoRateLimit } from '@/lib/ratelimit';
+import { reserveCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
+import { appendRunEvent } from '@/lib/run-events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   const t0 = Date.now();
+  let userId: number | null = null;
   let recordId: number | null = null;
+  // Credit reconciliation guard for the outer catch: once we reserve credits we MUST
+  // either settle or refund exactly once before returning. These track that obligation.
+  let reservedCredits = 0;
+  let creditsReconciled = false;
+  // The generation idempotency key — keys reserve/settle/refund on the ledger.
+  let idempotencyKey = '';
   try {
-    const userId = requireAuth(req);
+    userId = requireAuth(req);
     const rl = await checkVideoRateLimit(userId);
     if (!rl.allowed) {
       return Response.json(
@@ -57,6 +74,58 @@ export async function POST(req: Request) {
       }
     }
 
+    // Ownership validation: if a projectId is referenced, it must belong to this user.
+    // (projectId is reserved for Phase 4 Projects; validated defensively today.)
+    const projectIdRaw = fields.projectId;
+    const projectId =
+      projectIdRaw != null && projectIdRaw !== '' && Number.isFinite(Number(projectIdRaw))
+        ? Number(projectIdRaw)
+        : null;
+    if (projectId != null) {
+      const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
+      if (!proj) {
+        return json({ error: 'المشروع غير موجود أو لا تملك صلاحية الوصول إليه' }, 403);
+      }
+    }
+
+    // Server-side capability validation via @orms/model-router (never trust the client).
+    const modelDef = await findModelDefinition(fields.model);
+    if (!modelDef || modelDef.mediaType !== 'video') {
+      return json({ error: 'النموذج المحدد غير مدعوم لتوليد الفيديو' }, 400);
+    }
+
+    // Server-side credit estimate (integer units). Video cost scales with duration.
+    const durationSeconds = typeof params.duration === 'number' && params.duration > 0 ? params.duration : 5;
+    const estimatedCredits = estimateCredits('video', { durationSeconds });
+
+    // Idempotency: a client-supplied key short-circuits a duplicate submit (no re-charge,
+    // no re-submit). If absent, mint a server-side key scoped to the user.
+    const clientKey = req.headers.get('idempotency-key');
+    idempotencyKey =
+      clientKey && clientKey.trim() !== '' ? clientKey.trim() : `gen-vid:${userId}:${crypto.randomUUID()}`;
+
+    // Resolve an existing generation by idempotency key. If it belongs to this user,
+    // return its current serialized state without re-charging. If the key collides with
+    // another user's generation (extremely unlikely), mint a fresh server key so the
+    // unique constraint isn't violated.
+    const existing = await prisma.generation.findUnique({ where: { idempotencyKey } });
+    if (existing) {
+      if (existing.userId === userId) {
+        return json({
+          id: existing.id,
+          job_id: existing.jobId,
+          polling_url: existing.pollingUrl,
+          status: existing.status,
+          message: 'تم استلام طلب الفيديو مسبقاً — استخدم GET /api/generate/generations/' +
+            existing.id +
+            ' للمتابعة',
+        });
+      }
+      idempotencyKey = `gen-vid:${userId}:${crypto.randomUUID()}`;
+    }
+
+    // Create the Generation row (status: pending). estimatedCredits is set now;
+    // reservedCredits is filled after a successful reservation.
     const record = await prisma.generation.create({
       data: {
         userId,
@@ -66,25 +135,103 @@ export async function POST(req: Request) {
         prompt: fields.prompt,
         paramsJson: JSON.stringify(params),
         status: 'pending',
+        provider: 'openrouter',
+        idempotencyKey,
+        estimatedCredits,
+        projectId: projectId ?? undefined,
       },
       select: { id: true },
     });
     recordId = record.id;
 
-    const submit = await orouter.submitVideo(params);
-    const jobId = submit.id;
-    const pollingUrl = submit.polling_url ?? null;
+    await appendRunEvent({ generationId: recordId, userId, type: 'created' });
+
+    // Reserve credits before submitting to the provider. On insufficient balance, mark
+    // the generation failed (Arabic), persist a failure RunEvent, and return 402 — no
+    // refund is needed because nothing was reserved.
+    try {
+      await reserveCredits(userId, estimatedCredits, {
+        generationId: recordId,
+        idempotencyKey,
+      });
+      reservedCredits = estimatedCredits;
+      await prisma.generation.update({
+        where: { id: recordId },
+        data: { reservedCredits },
+      });
+      await appendRunEvent({ generationId: recordId, userId, type: 'queued' });
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        await appendRunEvent({
+          generationId: recordId,
+          userId,
+          type: 'failed',
+          dataJson: JSON.stringify({ reason: 'insufficient_credits' }),
+        });
+        await prisma.generation
+          .update({
+            where: { id: recordId },
+            data: { status: 'failed', error: 'الرصيد غير كافٍ لإتمام هذا التوليد' },
+          })
+          .catch(() => {});
+        creditsReconciled = true; // nothing was reserved
+        return json(
+          { id: recordId, error: 'الرصيد غير كافٍ لإتمام هذا التوليد', code: 'insufficient_credits' },
+          402,
+        );
+      }
+      throw e;
+    }
+
+    // Submit to the provider through the EXISTING path (signature/behavior unchanged).
+    let jobId: string;
+    let pollingUrl: string | null;
+    try {
+      const submit = await orouter.submitVideo(params);
+      jobId = submit.id;
+      pollingUrl = submit.polling_url ?? null;
+    } catch (e) {
+      const ne = normalizeError(e);
+      await prisma.generation
+        .update({ where: { id: recordId }, data: { status: 'failed', error: ne.messageAr } })
+        .catch(() => {});
+      await appendRunEvent({
+        generationId: recordId,
+        userId,
+        type: 'failed',
+        dataJson: JSON.stringify({ error: { code: ne.code, retryable: ne.retryable } }),
+      });
+      await refundCredits(userId, {
+        generationId: recordId,
+        amount: reservedCredits,
+        idempotencyKey,
+        reason: 'generation failed',
+      });
+      creditsReconciled = true;
+      return json(
+        { id: recordId, error: ne.messageAr, code: ne.code, retryable: ne.retryable },
+        ne.retryable ? 502 : 400,
+      );
+    }
+
     await prisma.generation.update({
       where: { id: recordId },
       data: { status: 'pending', jobId, pollingUrl },
     });
+    await appendRunEvent({
+      generationId: recordId,
+      userId,
+      type: 'submitted',
+      dataJson: JSON.stringify({ job_id: jobId }),
+    });
 
-    // Use the durable BullMQ worker when Redis is available; otherwise fall back to the
-    // in-process fire-and-forget poller (local dev without Redis).
+    // Dispatch: use the durable BullMQ worker when Redis is available; otherwise fall
+    // back to the in-process fire-and-forget poller (local dev without Redis). Both
+    // write IDENTICAL RunEvents and settle/refund exactly once.
     if (process.env.REDIS_URL) {
-      await enqueueVideoJob(recordId, jobId, t0);
+      await enqueueVideoJob(recordId, jobId, t0, userId, reservedCredits, idempotencyKey);
     } else {
-      pollAndDownloadVideo(recordId, jobId, t0).catch((e) => {
+      pollAndDownloadVideo(recordId, jobId, t0, userId, reservedCredits, idempotencyKey).catch((e) => {
         console.warn('[video] in-process poll failed (set REDIS_URL for durable jobs):', (e as Error).message);
       });
     }
@@ -97,7 +244,24 @@ export async function POST(req: Request) {
       message: 'تم استلام طلب الفيديو — استخدم GET /api/generate/generations/' + recordId + ' للمتابعة',
     });
   } catch (e) {
-    if (recordId != null) {
+    // Outer catch: handles failures that escaped the typed branches above. If we
+    // reserved credits but never reconciled, refund exactly once (distinct recover key)
+    // and persist a failure RunEvent.
+    if (recordId != null && userId != null) {
+      if (reservedCredits > 0 && !creditsReconciled) {
+        await refundCredits(userId, {
+          generationId: recordId,
+          amount: reservedCredits,
+          idempotencyKey: `recover:${recordId}`,
+          reason: 'generation failed (uncaught)',
+        }).catch(() => {});
+      }
+      await appendRunEvent({
+        generationId: recordId,
+        userId,
+        type: 'failed',
+        dataJson: JSON.stringify({ error: (e as Error)?.message ?? 'unknown' }),
+      }).catch(() => {});
       await prisma.generation
         .update({ where: { id: recordId }, data: { status: 'failed', error: (e as Error).message } })
         .catch(() => {});
